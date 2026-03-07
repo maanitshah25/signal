@@ -1,6 +1,6 @@
 const TINYFISH_API_KEY = "REPLACE_WITH_YOUR_TINYFISH_KEY";
 const TINYFISH_URL = "https://agent.tinyfish.ai/v1/automation/run-sse";
-const MOCK_MODE = true; // ← set to false when you have API credits
+const MOCK_MODE = true;
 
 // Keep service worker alive during long SSE streams
 const keepAlive = () => setInterval(() => chrome.runtime.getPlatformInfo(), 20000);
@@ -33,7 +33,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === "daily-check") await runDailyChecks();
 });
 
-// ── MOCK DATA ─────────────────────────────────────────────────────────────
+// MOCK DATA
 function getMockResearcher(url) {
   // Extract a plausible name from the URL for realism
   const isScholar = url.includes("scholar.google.com");
@@ -130,7 +130,7 @@ function getMockIntelligence(name) {
   };
 }
 
-// ── MOCK SSE STREAM SIMULATION ────────────────────────────────────────────
+// MOCK SSE STREAM SIMULATION 
 async function simulateMockStream(researcherId, steps) {
   const delay = (ms) => new Promise(res => setTimeout(res, ms));
   for (const step of steps) {
@@ -147,7 +147,7 @@ async function simulateMockStream(researcherId, steps) {
   await delay(800);
 }
 
-// ── CORE TINYFISH CALL ────────────────────────────────────────────────────
+// CORE TINYFISH CALL
 async function callTinyfish(url, goal, researcherId = null) {
   console.log("[Signal] → TinyFish call for:", url);
   const interval = keepAlive();
@@ -209,7 +209,7 @@ async function callTinyfish(url, goal, researcherId = null) {
           }
         }
 
-        // Capture final result — handle all TinyFish response shapes
+        // Capture final result
         if (
           parsed.type === "COMPLETE" || parsed.type === "complete" ||
           parsed.status === "COMPLETED" || parsed.status === "completed"
@@ -251,7 +251,6 @@ async function callTinyfish(url, goal, researcherId = null) {
 
 function safeParseJson(str) {
   try {
-    // Strip markdown code fences if present
     const clean = str.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
     return JSON.parse(clean);
   } catch (_) { return null; }
@@ -269,10 +268,10 @@ function extractStepMessage(event) {
   return null;
 }
 
-// ── RESEARCHER DETECTION ──────────────────────────────────────────────────
+// RESEARCHER DETECTION
 async function fetchResearcherInfo(pageUrl) {
   if (MOCK_MODE) {
-    await new Promise(r => setTimeout(r, 1500)); // simulate latency
+    await new Promise(r => setTimeout(r, 1500));
     return { success: true, data: getMockResearcher(pageUrl) };
   }
 
@@ -296,7 +295,7 @@ If NO, respond in json format: { "is_researcher_page": false }`;
   return await callTinyfish(pageUrl, goal);
 }
 
-// ── INTELLIGENCE FETCH ────────────────────────────────────────────────────
+// INTELLIGENCE FETCH
 async function fetchIntelligence(researcher, researcherId) {
   if (MOCK_MODE) {
     const steps = [
@@ -345,7 +344,7 @@ Include up to 6 recent papers sorted by most recent first. Return empty arrays f
   return await callTinyfish(url, goal, researcherId);
 }
 
-// ── TEST NOTIFICATION ─────────────────────────────────────────────────────
+// TEST NOTIFICATION
 async function testNotification(researcherId) {
   const { bookmarks = [] } = await chrome.storage.local.get("bookmarks");
   const researcher = bookmarks.find(b => b.id === researcherId);
@@ -403,7 +402,7 @@ async function testNotification(researcherId) {
   return { success: true, paperCount: newPapers.length };
 }
 
-// ── DAILY MONITORING ──────────────────────────────────────────────────────
+// DAILY MONITORING
 async function runDailyChecks() {
   const { bookmarks = [] } = await chrome.storage.local.get("bookmarks");
   for (const researcher of bookmarks) {

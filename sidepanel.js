@@ -1,4 +1,4 @@
-// ── STATE ──────────────────────────────────────────────────────────────────
+// STATE
 let state = {
   view: "feed",
   bookmarks: [],
@@ -8,7 +8,7 @@ let state = {
   agentSteps: {}, // researcherId -> array of step strings
 };
 
-// ── INIT ───────────────────────────────────────────────────────────────────
+// INIT
 document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("nav-feed").addEventListener("click", () => showView("feed"));
   document.getElementById("nav-bookmarks").addEventListener("click", () => showView("bookmarks"));
@@ -58,7 +58,7 @@ async function loadBookmarks() {
   state.bookmarks = bookmarks;
 }
 
-// ── PAGE DETECTION ─────────────────────────────────────────────────────────
+// PAGE DETECTION
 async function detectCurrentPage() {
   state.detecting = true;
   updateDetectCard();
@@ -90,7 +90,7 @@ async function detectCurrentPage() {
   updateDetectCard();
 }
 
-// ── DETECT CARD ────────────────────────────────────────────────────────────
+// DETECT CARD
 function updateDetectCard() {
   const container = document.getElementById("page-card");
 
@@ -133,7 +133,7 @@ function updateDetectCard() {
   }
 }
 
-// ── BOOKMARK ───────────────────────────────────────────────────────────────
+// BOOKMARK
 async function bookmarkCurrent() {
   if (!state.currentPage) return;
   const btn = document.getElementById("bookmark-btn");
@@ -165,7 +165,7 @@ async function bookmarkCurrent() {
   fetchAndStoreIntelligence(researcher.id);
 }
 
-// ── FETCH INTELLIGENCE ─────────────────────────────────────────────────────
+// FETCH INTELLIGENCE
 async function fetchAndStoreIntelligence(researcherId) {
   const { bookmarks = [] } = await chrome.storage.local.get("bookmarks");
   const researcher = bookmarks.find(b => b.id === researcherId);
@@ -199,7 +199,7 @@ async function fetchAndStoreIntelligence(researcherId) {
   }
 }
 
-// ── VIEWS ──────────────────────────────────────────────────────────────────
+// VIEWS
 function showView(view) {
   state.view = view;
   state.activeResearcher = null;
@@ -214,7 +214,7 @@ function renderView() {
   else if (state.view === "researcher") renderFeed();
 }
 
-// ── FEED LIST ──────────────────────────────────────────────────────────────
+// FEED LIST
 function renderFeedList() {
   const content = document.getElementById("main-content");
   if (!state.bookmarks.length) {
@@ -257,7 +257,7 @@ function renderFeedList() {
     }).join("")}`;
 }
 
-// ── BOOKMARKS LIST ─────────────────────────────────────────────────────────
+// BOOKMARKS LIST
 function renderBookmarksList() {
   const content = document.getElementById("main-content");
   if (!state.bookmarks.length) {
@@ -288,7 +288,7 @@ function renderBookmarksList() {
       </div>`).join("")}`;
 }
 
-// ── RESEARCHER FEED ────────────────────────────────────────────────────────
+// RESEARCHER FEED
 function openResearcher(id) {
   const researcher = state.bookmarks.find(b => b.id === id);
   if (!researcher) return;
@@ -328,7 +328,7 @@ function renderFeed() {
       </button>
     </div>`;
 
-  // ── Live agent activity log (always show while loading, collapse after)
+  // Live agent activity log (always show while loading, collapse after)
   if (isLoading || steps.length > 0) {
     html += `
       <div class="agent-log ${isLoading ? "active" : "done"}">
@@ -366,7 +366,7 @@ function renderFeed() {
     return;
   }
 
-  // ── Papers
+  // Papers
   if (intel.recent_papers?.length) {
     html += `<div class="section-title">📄 Recent Papers</div>`;
     intel.recent_papers.forEach(p => {
@@ -380,7 +380,7 @@ function renderFeed() {
     });
   }
 
-  // ── Citation spikes
+  // Citation spikes
   if (intel.citation_spikes?.length) {
     html += `<div class="section-title">📈 Citation Spikes</div>`;
     intel.citation_spikes.forEach(p => {
@@ -393,7 +393,7 @@ function renderFeed() {
     });
   }
 
-  // ── Grants
+  // Grants
   if (intel.grants?.length) {
     html += `<div class="section-title">💰 Grants & Funding</div>`;
     intel.grants.forEach(g => {
@@ -406,7 +406,7 @@ function renderFeed() {
     });
   }
 
-  // ── Patents
+  // Patents
   if (intel.patents?.length) {
     html += `<div class="section-title">⚙ Patents</div>`;
     intel.patents.forEach(p => {
@@ -419,7 +419,7 @@ function renderFeed() {
     });
   }
 
-  // ── Collaborations
+  // Collaborations
   if (intel.collaborations?.length) {
     html += `<div class="section-title">🤝 Collaborations</div>`;
     intel.collaborations.forEach(c => {
@@ -460,7 +460,7 @@ function updateAgentLog(steps) {
   el.scrollTop = el.scrollHeight;
 }
 
-// ── ACTIONS ────────────────────────────────────────────────────────────────
+// ACTIONS
 async function triggerTestNotification(id) {
   const btn = document.querySelector(`[data-action="test-notification"][data-id="${id}"]`);
   if (btn) { btn.disabled = true; btn.textContent = "Running…"; }
@@ -514,7 +514,7 @@ chrome.tabs.onUpdated.addListener((_, changeInfo) => {
   if (changeInfo.status === "complete") detectCurrentPage();
 });
 
-// ── UTILS ──────────────────────────────────────────────────────────────────
+// UTILS
 function esc(str) {
   if (!str) return "";
   return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");

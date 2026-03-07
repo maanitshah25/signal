@@ -33,7 +33,6 @@
       overflow: hidden;
     }
 
-    /* ── HEADER ── */
     .header {
       padding: 14px 16px 12px;
       border-bottom: 1px solid var(--border);
@@ -78,7 +77,6 @@
     .nav-btn:hover { background: var(--surface2); color: var(--text); }
     .nav-btn.active { background: var(--surface2); color: var(--accent2); }
 
-    /* ── CURRENT PAGE CARD ── */
     .page-card {
       margin: 12px 12px 0;
       background: var(--surface);
@@ -171,7 +169,6 @@
       font-size: 12px;
     }
 
-    /* ── SCROLL AREA ── */
     .scroll-area {
       flex: 1;
       overflow-y: auto;
@@ -181,7 +178,6 @@
     .scroll-area::-webkit-scrollbar-track { background: transparent; }
     .scroll-area::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 
-    /* ── SECTION ── */
     .section-title {
       font-size: 10px;
       font-weight: 700;
@@ -192,7 +188,6 @@
     }
     .section-title:first-child { margin-top: 4px; }
 
-    /* ── RESEARCHER CARDS ── */
     .researcher-card {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -220,7 +215,6 @@
     .rc-stat { font-size: 11px; color: var(--muted); }
     .rc-stat span { color: var(--text); font-weight: 500; }
 
-    /* ── INTELLIGENCE FEED ── */
     .feed-header {
       display: flex;
       align-items: center;
@@ -282,7 +276,6 @@
       font-style: italic;
     }
 
-    /* ── LOADING ── */
     .loading-card {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -323,7 +316,6 @@
     .empty-title { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
     .empty-desc { font-size: 12px; line-height: 1.6; }
 
-    /* ── TABS ── */
     .tabs {
       display: flex;
       gap: 2px;
@@ -357,7 +349,6 @@
       line-height: 1.5;
     }
 
-    /* ── AGENT LOG ── */
     .agent-log {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -397,7 +388,6 @@
     @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
     .blink { animation: blink 1s ease infinite; color: var(--accent2) !important; }
 
-    /* ── REFRESH BTN ── */
     .refresh-btn {
       width: 100%;
       background: var(--surface);
@@ -427,7 +417,6 @@
   </div>
 </div>
 
-<!-- Current page detection card -->
 <div class="page-card" id="page-card">
   <div class="page-card-label">Current Page</div>
   <div class="detecting-row" id="detect-status">
@@ -436,7 +425,6 @@
   </div>
 </div>
 
-<!-- Main scroll area -->
 <div class="scroll-area" id="main-content">
   <div class="empty-state">
     <div class="empty-icon">🔬</div>
