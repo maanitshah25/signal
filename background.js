@@ -6,7 +6,7 @@ chrome.action.onClicked.addListener((tab) => {
   chrome.sidePanel.open({ tabId: tab.id });
 });
 
-// Listen for messages from sidepanel and content scripts
+// Listen for messages from side panel and content scripts
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "FETCH_RESEARCHER_INFO") {
     fetchResearcherInfo(msg.url, msg.pageText).then(sendResponse);
@@ -19,12 +19,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 // Daily alarm for monitoring bookmarked researchers
-chrome.alarms.create("daily-check", { periodInMinutes: 1440 });
+chrome.alarms.create("daily-check", { periodInMinutes: 1 });
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === "daily-check") await runDailyChecks();
 });
 
-// ── TINYFISH CALL ──────────────────────────────────────────────────────────
+// TINYFISH CALL
 async function callTinyfish(url, goal) {
   console.log("[Signal] Calling TinyFish for URL:", url);
 
@@ -104,7 +104,7 @@ async function callTinyfish(url, goal) {
   }
 }
 
-// ── RESEARCHER DETECTION ───────────────────────────────────────────────────
+// RESEARCHER DETECTION
 async function fetchResearcherInfo(pageUrl, pageText) {
   const goal = `Navigate to this URL and identify whether it is an academic researcher or research lab profile page: ${pageUrl}
 
@@ -146,7 +146,7 @@ Respond in json format: { "recent_papers": [], "citation_spikes": [], "grants": 
   return await callTinyfish(searchUrl, goal);
 }
 
-// ── DAILY MONITORING ───────────────────────────────────────────────────────
+// DAILY MONITORING 
 async function runDailyChecks() {
   const { bookmarks = [] } = await chrome.storage.local.get("bookmarks");
   for (const researcher of bookmarks) {
