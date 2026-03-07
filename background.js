@@ -1,32 +1,156 @@
-const TINYFISH_API_KEY = "sk-tinyfish-Hh17L5CpyH3gFCXA_GqTohD6v13uZmTO";
+const TINYFISH_API_KEY = "REPLACE_WITH_YOUR_TINYFISH_KEY";
 const TINYFISH_URL = "https://agent.tinyfish.ai/v1/automation/run-sse";
+const MOCK_MODE = true; // ← set to false when you have API credits
 
-// Open side panel when extension icon is clicked
+// Keep service worker alive during long SSE streams
+const keepAlive = () => setInterval(() => chrome.runtime.getPlatformInfo(), 20000);
+
 chrome.action.onClicked.addListener((tab) => {
   chrome.sidePanel.open({ tabId: tab.id });
 });
 
-// Listen for messages from side panel and content scripts
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type === "GET_MODE") {
+    sendResponse({ mock: MOCK_MODE });
+    return true;
+  }
   if (msg.type === "FETCH_RESEARCHER_INFO") {
-    fetchResearcherInfo(msg.url, msg.pageText).then(sendResponse);
+    fetchResearcherInfo(msg.url).then(sendResponse);
     return true;
   }
   if (msg.type === "FETCH_INTELLIGENCE") {
-    fetchIntelligence(msg.researcher).then(sendResponse);
+    fetchIntelligence(msg.researcher, msg.researcherId).then(sendResponse);
+    return true;
+  }
+  if (msg.type === "TEST_NOTIFICATION") {
+    testNotification(msg.researcherId).then(sendResponse);
     return true;
   }
 });
 
-// Daily alarm for monitoring bookmarked researchers
-chrome.alarms.create("daily-check", { periodInMinutes: 1 });
+chrome.alarms.create("daily-check", { periodInMinutes: 1440 });
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === "daily-check") await runDailyChecks();
 });
 
-// TINYFISH CALL
-async function callTinyfish(url, goal) {
-  console.log("[Signal] Calling TinyFish for URL:", url);
+// ── MOCK DATA ─────────────────────────────────────────────────────────────
+function getMockResearcher(url) {
+  // Extract a plausible name from the URL for realism
+  const isScholar = url.includes("scholar.google.com");
+  const isArxiv = url.includes("arxiv.org");
+  return {
+    is_researcher_page: true,
+    researcher_name: isArxiv ? "Yann LeCun" : "Geoffrey Hinton",
+    institution: isArxiv ? "Meta AI / NYU" : "University of Toronto / Google Brain",
+    department: "Computer Science & Machine Learning",
+    research_areas: ["Deep Learning", "Neural Networks", "Computer Vision", "AI Safety"],
+    scholar_url: isScholar ? url : null,
+    profile_summary: "A pioneering researcher in deep learning and neural networks whose work on backpropagation and convolutional networks laid the foundation for modern AI systems.",
+  };
+}
+
+function getMockIntelligence(name) {
+  const now = new Date();
+  const year = now.getFullYear();
+  return {
+    recent_papers: [
+      {
+        title: "Scaling Laws for Neural Language Models in Low-Resource Settings",
+        year,
+        citations: 312,
+        url: "https://arxiv.org/abs/2401.00001",
+        summary: "Investigates how scaling laws apply when training data is limited, finding diminishing returns beyond certain parameter thresholds.",
+      },
+      {
+        title: "Sparse Autoencoders for Interpretable Feature Extraction",
+        year,
+        citations: 187,
+        url: "https://arxiv.org/abs/2401.00002",
+        summary: "Proposes a new architecture for learning sparse, interpretable representations in large language models.",
+      },
+      {
+        title: "Towards Robust Out-of-Distribution Detection in Vision Transformers",
+        year: year - 1,
+        citations: 540,
+        url: "https://arxiv.org/abs/2312.00001",
+        summary: "Benchmarks OOD detection methods across ViT variants and proposes an ensemble approach that outperforms baselines.",
+      },
+      {
+        title: "Efficient Fine-Tuning of Foundation Models via Gradient Checkpointing",
+        year: year - 1,
+        citations: 229,
+        url: null,
+        summary: "Demonstrates 60% memory reduction during fine-tuning with minimal accuracy tradeoff using selective gradient checkpointing.",
+      },
+    ],
+    citation_spikes: [
+      {
+        title: "Attention Is All You Need — Revisited",
+        total_citations: 4821,
+        spike_note: `Citations up 38% in the last 6 months — likely driven by renewed interest in transformer efficiency research`,
+      },
+      {
+        title: "Dropout: A Simple Way to Prevent Neural Networks from Overfitting",
+        total_citations: 39200,
+        spike_note: "Consistently high citation velocity — referenced in almost every new deep learning paper",
+      },
+    ],
+    grants: [
+      {
+        title: "Foundation Models for Scientific Discovery",
+        funder: "NSF",
+        year,
+        amount: "$1,200,000",
+      },
+      {
+        title: "Robust Machine Learning Systems",
+        funder: "DARPA",
+        year: year - 1,
+        amount: "$850,000",
+      },
+    ],
+    patents: [
+      {
+        title: "Method for training sparse neural networks with dynamic pruning",
+        year: year - 1,
+        patent_number: "US11,823,456",
+      },
+    ],
+    collaborations: [
+      {
+        partner: "Google DeepMind",
+        description: "Joint research on scaling efficient transformer architectures for on-device inference",
+      },
+      {
+        partner: "OpenAI",
+        description: "Co-authored paper on mechanistic interpretability of attention heads",
+      },
+    ],
+    last_checked: now.toISOString(),
+  };
+}
+
+// ── MOCK SSE STREAM SIMULATION ────────────────────────────────────────────
+async function simulateMockStream(researcherId, steps) {
+  const delay = (ms) => new Promise(res => setTimeout(res, ms));
+  for (const step of steps) {
+    await delay(600 + Math.random() * 400);
+    try {
+      chrome.runtime.sendMessage({
+        type: "AGENT_STEP",
+        researcherId,
+        step,
+        allSteps: steps.slice(0, steps.indexOf(step) + 1),
+      });
+    } catch (_) {}
+  }
+  await delay(800);
+}
+
+// ── CORE TINYFISH CALL ────────────────────────────────────────────────────
+async function callTinyfish(url, goal, researcherId = null) {
+  console.log("[Signal] → TinyFish call for:", url);
+  const interval = keepAlive();
 
   try {
     const response = await fetch(TINYFISH_URL, {
@@ -40,17 +164,16 @@ async function callTinyfish(url, goal) {
 
     if (!response.ok) {
       const errText = await response.text();
-      console.error("[Signal] TinyFish HTTP error:", response.status, errText);
+      console.error("[Signal] HTTP error:", response.status, errText);
+      clearInterval(interval);
       return { success: false, error: `HTTP ${response.status}: ${errText}` };
     }
-
-    console.log("[Signal] TinyFish connected, reading SSE stream...");
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
-    let lastResult = null;
-    let rawLines = [];
+    let finalResult = null;
+    let steps = [];
 
     while (true) {
       const { done, value } = await reader.read();
@@ -61,96 +184,230 @@ async function callTinyfish(url, goal) {
       buffer = lines.pop();
 
       for (const line of lines) {
-        rawLines.push(line);
         if (!line.startsWith("data: ")) continue;
         const raw = line.slice(6).trim();
         if (!raw || raw === "[DONE]") continue;
 
-        try {
-          const data = JSON.parse(raw);
-          console.log("[Signal] SSE event:", data.type || data.status, data);
+        let parsed;
+        try { parsed = JSON.parse(raw); } catch (_) { continue; }
 
-          if (
-            data.type === "COMPLETE" || data.type === "complete" ||
-            data.status === "COMPLETED" || data.status === "completed"
-          ) {
-            if (data.resultJson) {
-              lastResult = data.resultJson;
-            } else if (data.result) {
-              lastResult = typeof data.result === "string" ? JSON.parse(data.result) : data.result;
-            } else if (data.output) {
-              lastResult = typeof data.output === "string" ? JSON.parse(data.output) : data.output;
-            }
+        console.log("[Signal] SSE:", parsed.type || parsed.status, parsed);
+
+        // Forward live step updates to the sidepanel for the activity log
+        if (researcherId && parsed.type && parsed.type !== "COMPLETE") {
+          const stepMsg = extractStepMessage(parsed);
+          if (stepMsg) {
+            steps.push(stepMsg);
+            try {
+              chrome.runtime.sendMessage({
+                type: "AGENT_STEP",
+                researcherId,
+                step: stepMsg,
+                allSteps: [...steps],
+              });
+            } catch (_) {}
           }
-          if (data.type === "RESULT" && data.data) lastResult = data.data;
+        }
 
-        } catch (parseErr) {
-          try { lastResult = JSON.parse(raw); } catch (_) {}
+        // Capture final result — handle all TinyFish response shapes
+        if (
+          parsed.type === "COMPLETE" || parsed.type === "complete" ||
+          parsed.status === "COMPLETED" || parsed.status === "completed"
+        ) {
+          if (parsed.resultJson && typeof parsed.resultJson === "object") {
+            finalResult = parsed.resultJson;
+          } else if (parsed.result) {
+            finalResult = typeof parsed.result === "string"
+              ? safeParseJson(parsed.result) : parsed.result;
+          } else if (parsed.output) {
+            finalResult = typeof parsed.output === "string"
+              ? safeParseJson(parsed.output) : parsed.output;
+          }
+        }
+
+        // Some TinyFish responses wrap result in data field
+        if (!finalResult && parsed.data && typeof parsed.data === "object") {
+          if (parsed.data.recent_papers || parsed.data.researcher_name || parsed.data.is_researcher_page !== undefined) {
+            finalResult = parsed.data;
+          }
         }
       }
     }
 
-    console.log("[Signal] Stream complete. Final result:", lastResult);
-    console.log("[Signal] All SSE lines:", rawLines);
+    clearInterval(interval);
+    console.log("[Signal] ✓ Final result:", finalResult);
 
-    if (!lastResult) {
-      return { success: false, error: "TinyFish returned no result. Check service worker console for raw SSE output." };
+    if (!finalResult) {
+      return { success: false, error: "No result returned from TinyFish. The page may have been blocked or the agent timed out." };
     }
-    return { success: true, data: lastResult };
+    return { success: true, data: finalResult, steps };
 
   } catch (err) {
-    console.error("[Signal] Fetch error:", err);
+    clearInterval(interval);
+    console.error("[Signal] Fetch failed:", err);
     return { success: false, error: err.message };
   }
 }
 
-// RESEARCHER DETECTION
-async function fetchResearcherInfo(pageUrl, pageText) {
-  const goal = `Navigate to this URL and identify whether it is an academic researcher or research lab profile page: ${pageUrl}
+function safeParseJson(str) {
+  try {
+    // Strip markdown code fences if present
+    const clean = str.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+    return JSON.parse(clean);
+  } catch (_) { return null; }
+}
 
-If it is a researcher or lab page, extract:
-- researcher_name: full name of the researcher or lab director
-- institution: university or institution name
-- department: department or research field
-- research_areas: array of up to 4 main research topics
-- is_researcher_page: true
-- scholar_url: the current URL if it is a Google Scholar page, else null
-- profile_summary: 1-2 sentence summary of who this person is
+function extractStepMessage(event) {
+  if (event.type === "NAVIGATING" || event.action === "navigate") return `🌐 Navigating to ${event.url || "page"}…`;
+  if (event.type === "SEARCHING") return `🔍 Searching for ${event.query || "results"}…`;
+  if (event.type === "EXTRACTING") return `📄 Extracting data from page…`;
+  if (event.type === "THINKING" || event.type === "PLANNING") return `🧠 Analyzing results…`;
+  if (event.type === "CLICKING") return `👆 Interacting with page…`;
+  if (event.type === "SCROLLING") return `📜 Reading page content…`;
+  if (event.message) return `⚡ ${event.message}`;
+  if (event.step) return `⚡ ${event.step}`;
+  return null;
+}
 
-If it is NOT a researcher page, just return is_researcher_page as false.
+// ── RESEARCHER DETECTION ──────────────────────────────────────────────────
+async function fetchResearcherInfo(pageUrl) {
+  if (MOCK_MODE) {
+    await new Promise(r => setTimeout(r, 1500)); // simulate latency
+    return { success: true, data: getMockResearcher(pageUrl) };
+  }
 
-Respond in json format: { "researcher_name": "", "institution": "", "department": "", "research_areas": [], "is_researcher_page": true, "scholar_url": null, "profile_summary": "" }`;
+  const goal = `Navigate to this URL: ${pageUrl}
+
+Determine if this is an academic researcher or research lab profile page.
+
+If YES, extract and respond in json format:
+{
+  "is_researcher_page": true,
+  "researcher_name": "full name",
+  "institution": "university name",
+  "department": "department or field",
+  "research_areas": ["topic1", "topic2", "topic3"],
+  "scholar_url": "this URL if it is a Google Scholar page, else null",
+  "profile_summary": "2 sentence summary of who this person is and what they research"
+}
+
+If NO, respond in json format: { "is_researcher_page": false }`;
 
   return await callTinyfish(pageUrl, goal);
 }
 
-// ── INTELLIGENCE FETCH ─────────────────────────────────────────────────────
-async function fetchIntelligence(researcher) {
-  const searchUrl = researcher.scholar_url || researcher.url ||
+// ── INTELLIGENCE FETCH ────────────────────────────────────────────────────
+async function fetchIntelligence(researcher, researcherId) {
+  if (MOCK_MODE) {
+    const steps = [
+      "🌐 Navigating to Google Scholar profile…",
+      "📄 Reading publications list…",
+      "🔍 Extracting recent papers and citation counts…",
+      "🌐 Checking NIH Reporter for grant awards…",
+      "🌐 Searching USPTO for patent filings…",
+      "🧠 Analyzing collaboration signals…",
+      "✓ Intelligence scan complete",
+    ];
+    await simulateMockStream(researcherId, steps);
+    return { success: true, data: getMockIntelligence(researcher.name), steps };
+  }
+
+  const url = researcher.scholar_url || researcher.url ||
     `https://scholar.google.com/scholar?q=${encodeURIComponent(researcher.name + " " + researcher.institution)}`;
 
-  const goal = `Navigate to this page and research the academic profile of ${researcher.name} at ${researcher.institution}: ${searchUrl}
+  const goal = `Navigate to this academic profile page: ${url}
 
-Find and extract:
-- recent_papers: up to 5 most recent papers, each with title, year, citations count, url, and a one sentence summary
-- citation_spikes: any papers with notably high or rapidly growing citations, each with title, total_citations, and spike_note
-- grants: any grants or funding awarded, each with title, funder, year, and amount
-- patents: any patents filed or granted, each with title, year, and patent_number
-- collaborations: any notable industry or cross-institution collaborations, each with partner and description
-- last_checked: today's date in ISO format
+Research everything available about ${researcher.name} at ${researcher.institution}.
+Look through their publications list, check citation counts, and find any mentions of grants, patents or industry collaborations.
 
-Return empty arrays for any categories where nothing is found.
-
-Respond in json format: { "recent_papers": [], "citation_spikes": [], "grants": [], "patents": [], "collaborations": [], "last_checked": "" }`;
-
-  return await callTinyfish(searchUrl, goal);
+Respond in json format:
+{
+  "recent_papers": [
+    { "title": "paper title", "year": 2024, "citations": 150, "url": "link or null", "summary": "one sentence about what this paper is about" }
+  ],
+  "citation_spikes": [
+    { "title": "paper title", "total_citations": 1200, "spike_note": "why this is notable e.g. highly cited in 2024" }
+  ],
+  "grants": [
+    { "title": "grant name", "funder": "NIH / NSF / etc", "year": 2023, "amount": "$500,000 or null" }
+  ],
+  "patents": [
+    { "title": "patent title", "year": 2022, "patent_number": "US1234567 or null" }
+  ],
+  "collaborations": [
+    { "partner": "company or institution", "description": "nature of the collaboration" }
+  ],
+  "last_checked": "today's date in ISO format"
 }
 
-// DAILY MONITORING 
+Include up to 6 recent papers sorted by most recent first. Return empty arrays for categories with no data found.`;
+
+  return await callTinyfish(url, goal, researcherId);
+}
+
+// ── TEST NOTIFICATION ─────────────────────────────────────────────────────
+async function testNotification(researcherId) {
+  const { bookmarks = [] } = await chrome.storage.local.get("bookmarks");
+  const researcher = bookmarks.find(b => b.id === researcherId);
+  if (!researcher) return { success: false };
+
+  if (MOCK_MODE) {
+    await new Promise(r => setTimeout(r, 1000));
+    const mockPaper = "Scaling Laws for Neural Language Models in Low-Resource Settings";
+    chrome.notifications.create(`test-notif-${Date.now()}`, {
+      type: "basic",
+      iconUrl: "icons/icon48.png",
+      title: `📄 New paper — ${researcher.name}`,
+      message: mockPaper,
+    });
+    const { bookmarks: current = [] } = await chrome.storage.local.get("bookmarks");
+    await chrome.storage.local.set({
+      bookmarks: current.map(b =>
+        b.id === researcherId ? { ...b, hasNew: true } : b
+      )
+    });
+    return { success: true, paperCount: 1 };
+  }
+
+  // Temporarily wipe stored intelligence so everything looks "new"
+  const wiped = bookmarks.map(b =>
+    b.id === researcherId ? { ...b, intelligence: null } : b
+  );
+  await chrome.storage.local.set({ bookmarks: wiped });
+
+  // Re-fetch — everything will appear as new papers
+  const result = await fetchIntelligence(researcher, researcherId);
+  if (!result.success || !result.data) return { success: false, error: result.error };
+
+  const newPapers = result.data.recent_papers || [];
+
+  if (newPapers.length > 0) {
+    chrome.notifications.create(`test-notif-${Date.now()}`, {
+      type: "basic",
+      iconUrl: "icons/icon48.png",
+      title: `📄 New paper — ${researcher.name}`,
+      message: newPapers[0].title,
+    });
+  }
+
+  // Save back the fresh intelligence
+  const { bookmarks: current = [] } = await chrome.storage.local.get("bookmarks");
+  await chrome.storage.local.set({
+    bookmarks: current.map(b =>
+      b.id === researcherId
+        ? { ...b, intelligence: result.data, lastChecked: new Date().toISOString(), hasNew: true }
+        : b
+    )
+  });
+
+  return { success: true, paperCount: newPapers.length };
+}
+
+// ── DAILY MONITORING ──────────────────────────────────────────────────────
 async function runDailyChecks() {
   const { bookmarks = [] } = await chrome.storage.local.get("bookmarks");
   for (const researcher of bookmarks) {
-    const result = await fetchIntelligence(researcher);
+    const result = await fetchIntelligence(researcher, researcher.id);
     if (!result.success || !result.data) continue;
 
     const prevTitles = new Set((researcher.intelligence?.recent_papers || []).map(p => p.title));
@@ -166,11 +423,12 @@ async function runDailyChecks() {
     }
 
     const { bookmarks: current = [] } = await chrome.storage.local.get("bookmarks");
-    const updated = current.map(b =>
-      b.id === researcher.id
-        ? { ...b, intelligence: result.data, lastChecked: new Date().toISOString(), hasNew: newPapers.length > 0 }
-        : b
-    );
-    await chrome.storage.local.set({ bookmarks: updated });
+    await chrome.storage.local.set({
+      bookmarks: current.map(b =>
+        b.id === researcher.id
+          ? { ...b, intelligence: result.data, lastChecked: new Date().toISOString(), hasNew: newPapers.length > 0 }
+          : b
+      )
+    });
   }
 }

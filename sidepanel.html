@@ -356,6 +356,61 @@
       color: var(--red);
       line-height: 1.5;
     }
+
+    /* ── AGENT LOG ── */
+    .agent-log {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      margin-bottom: 12px;
+      overflow: hidden;
+    }
+    .agent-log.active { border-color: var(--accent); }
+    .agent-log.done { border-color: var(--green); opacity: 0.8; }
+    .agent-log-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+    }
+    .agent-log.active .agent-log-header { color: var(--accent2); }
+    .agent-log-steps {
+      padding: 8px 12px;
+      max-height: 140px;
+      overflow-y: auto;
+      scroll-behavior: smooth;
+    }
+    .agent-log-steps::-webkit-scrollbar { width: 3px; }
+    .agent-log-steps::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    .agent-step {
+      font-size: 11px;
+      color: var(--muted);
+      padding: 3px 0;
+      line-height: 1.4;
+      font-family: 'SF Mono', 'Menlo', monospace;
+    }
+    .agent-step:last-child { color: var(--text); }
+    @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+    .blink { animation: blink 1s ease infinite; color: var(--accent2) !important; }
+
+    /* ── REFRESH BTN ── */
+    .refresh-btn {
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      cursor: pointer;
+      padding: 7px;
+      border-radius: 8px;
+      font-size: 11px;
+      margin-bottom: 12px;
+      transition: all 0.15s;
+    }
+    .refresh-btn:hover { border-color: var(--accent); color: var(--text); }
   </style>
 </head>
 <body>
@@ -364,6 +419,7 @@
   <div class="logo">
     <div class="logo-icon">⚡</div>
     <div class="logo-text">Signal</div>
+    <span id="mock-badge" style="display:none;font-size:9px;font-weight:700;background:rgba(251,191,36,0.15);color:#fbbf24;border:1px solid rgba(251,191,36,0.3);border-radius:4px;padding:1px 5px;letter-spacing:0.5px;">MOCK</span>
   </div>
   <div class="header-nav">
     <button class="nav-btn active" id="nav-feed">Feed</button>
