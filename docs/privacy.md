@@ -68,4 +68,4 @@ If this policy changes, the new version will be posted at this address with an u
 
 ## Contact
 
-Questions about this policy: open an issue at [github.com/maanitshah25/signal/issues](https://github.com/maanitshah25/signal/issues) or email **[YOUR CONTACT EMAIL]**.
+Questions about this policy: open an issue at [github.com/maanitshah25/signal/issues](https://github.com/maanitshah25/signal/issues) or email **maanithshah1@gmail.com**

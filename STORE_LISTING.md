@@ -74,6 +74,16 @@ Load the extension unpacked, turn on **Developer mode → Mock mode** in Setting
 
 Screenshots must be PNG or JPEG with no transparency. Turn mock mode off again before you take the Settings screenshot if you want a real balance shown.
 
+**Already generated:** both promo tiles are in `store-assets/final/` (`promo-small-440x280.png`, `promo-marquee-1400x560.png`). Regenerate with `python3 scripts/make-promo-tiles.py`.
+
+**Screenshots:** capture with ⌘⇧4 (drag a region) or ⌘⇧4 then Space (whole window), drop the PNGs into `store-assets/raw/`, then run:
+
+```bash
+./scripts/normalize-screenshots.sh
+```
+
+It fits each image inside 1280×800 and pads the rest with the Signal background colour, writing `store-assets/final/screenshot-N.png`.
+
 ## 4. Privacy tab answers
 
 **Single purpose description:**
