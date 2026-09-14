@@ -1,209 +1,289 @@
-// STATE
-let state = {
-  view: "feed",
-  bookmarks: [],
-  activeResearcher: null,
-  currentPage: null,
-  detecting: true,
-  agentSteps: {}, // researcherId -> array of step strings
-};
+// Signal side panel.
+// Reads tracked researchers through SignalStore; anything that costs money (detection,
+// intelligence scans) goes through background.js so there is exactly one TinyFish caller.
 
-// INIT
+const state = {
+  view: "feed",                     // feed | bookmarks | researcher | settings
+  bookmarks: [],
+  activeId: null,
+  status: { mock: false, hasKey: false, developerMode: false },
+  detect: { status: "idle", url: null, tabId: null, data: null, error: null, source: null },
+  agentSteps: {},                   // researcherId -> string[]
+  loading: new Set(),               // researcherIds with an in-flight scan
+};
+let detectSeq = 0;
+
+const send = (msg) => chrome.runtime.sendMessage(msg)
+  .catch((err) => ({ success: false, error: err?.message || String(err) }));
+
+// ---------- init ----------
+
 document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("nav-feed").addEventListener("click", () => showView("feed"));
   document.getElementById("nav-bookmarks").addEventListener("click", () => showView("bookmarks"));
+  document.getElementById("nav-settings").addEventListener("click", () => showView("settings"));
+  document.addEventListener("click", onDelegatedClick);
+  document.addEventListener("change", onDelegatedChange);
 
-  // Show mock badge if background is in mock mode
-  chrome.runtime.sendMessage({ type: "GET_MODE" }, (res) => {
-    if (res?.mock) document.getElementById("mock-badge").style.display = "inline";
-  });
-
-  document.addEventListener("click", (e) => {
-    const el = e.target.closest("[data-action]");
-    if (!el) return;
-    const action = el.dataset.action;
-    const id = el.dataset.id;
-    if (action === "open-researcher") {
-      if (e.target.closest("[data-action='remove-bookmark']")) return;
-      openResearcher(id);
-    } else if (action === "remove-bookmark") {
-      e.stopPropagation();
-      removeBookmark(id);
-    } else if (action === "refresh-researcher") {
-      refreshResearcher(id);
-    } else if (action === "test-notification") {
-      triggerTestNotification(id);
-    } else if (action === "back") {
-      showView("feed");
-    }
-  });
-
-  // Listen for live agent step updates from background
   chrome.runtime.onMessage.addListener((msg) => {
-    if (msg.type === "AGENT_STEP") {
-      state.agentSteps[msg.researcherId] = msg.allSteps;
-      if (state.activeResearcher?.id === msg.researcherId) {
-        updateAgentLog(msg.allSteps);
-      }
-    }
+    if (msg?.type !== "AGENT_STEP") return;
+    state.agentSteps[msg.researcherId] = msg.allSteps;
+    if (state.view === "researcher" && state.activeId === msg.researcherId) updateAgentLog(msg.allSteps);
   });
 
+  // Another device (or the background worker) changed tracked researchers.
+  chrome.storage.onChanged.addListener(async (changes, area) => {
+    const touchesBookmarks = area === "sync" ||
+      Object.keys(changes).some((k) => k.startsWith(SignalStore.INTEL_PREFIX));
+    if (!touchesBookmarks) return;
+    await loadBookmarks();
+    if (state.view !== "settings") renderView();
+    if (state.detect.status === "detected") renderDetectCard();
+  });
+
+  chrome.tabs.onActivated.addListener(() => detectCurrentPage());
+  chrome.tabs.onUpdated.addListener(async (tabId, info) => {
+    if (info.status !== "complete") return;
+    const tab = await getActiveTab();
+    if (tab?.id === tabId) detectCurrentPage();
+  });
+
+  await refreshStatus();
   await loadBookmarks();
-  await detectCurrentPage();
   renderView();
+  detectCurrentPage();
 });
 
-async function loadBookmarks() {
-  const { bookmarks = [] } = await chrome.storage.local.get("bookmarks");
-  state.bookmarks = bookmarks;
+async function refreshStatus() {
+  const res = await send({ type: "GET_STATUS" });
+  if (res?.success) state.status = { mock: res.mock, hasKey: res.hasKey, developerMode: res.developerMode };
+  document.getElementById("mock-badge").style.display = state.status.mock ? "inline" : "none";
 }
 
-// PAGE DETECTION
-async function detectCurrentPage() {
-  state.detecting = true;
-  updateDetectCard();
+async function loadBookmarks() {
+  state.bookmarks = await SignalStore.getBookmarks();
+}
 
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id || !tab.url || tab.url.startsWith("chrome://") || tab.url.startsWith("chrome-extension://")) {
-      state.detecting = false;
-      state.currentPage = null;
-      updateDetectCard();
+async function getActiveTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tab || null;
+}
+
+// ---------- event delegation ----------
+
+function onDelegatedClick(e) {
+  const el = e.target.closest("[data-action]");
+  if (!el) return;
+  const { action, id } = el.dataset;
+
+  switch (action) {
+    case "open-researcher":
+      if (e.target.closest("[data-action='remove-bookmark']")) return;
+      return openResearcher(id);
+    case "remove-bookmark":
+      e.stopPropagation();
+      return removeBookmark(id);
+    case "refresh-researcher": return startScan(id);
+    case "test-notification": return triggerTestNotification(id);
+    case "back": return showView("feed");
+    case "track": return trackCurrent();
+    case "scan-page": return detectCurrentPage({ manual: true, force: true });
+    case "rescan": return detectCurrentPage({ force: true });
+    case "open-settings": return showView("settings");
+    case "save-key": return saveApiKey();
+    case "test-key": return testApiKey();
+    case "toggle-key-visibility": {
+      const input = document.getElementById("api-key-input");
+      if (input) input.type = input.type === "password" ? "text" : "password";
       return;
     }
-
-    const result = await chrome.runtime.sendMessage({
-      type: "FETCH_RESEARCHER_INFO",
-      url: tab.url,
-    });
-
-    state.detecting = false;
-    state.currentPage = (result?.success && result?.data?.is_researcher_page)
-      ? { ...result.data, url: tab.url }
-      : null;
-
-  } catch (err) {
-    state.detecting = false;
-    state.currentPage = null;
+    case "clear-cache": return clearDetectionCache(el);
+    case "run-daily": return runDailyNow(el);
+    default: return;
   }
-
-  updateDetectCard();
 }
 
-// DETECT CARD
-function updateDetectCard() {
+async function onDelegatedChange(e) {
+  const el = e.target.closest("[data-setting]");
+  if (!el) return;
+  const setting = el.dataset.setting;
+  if (setting === "developerMode" || setting === "mockMode") {
+    await SignalStore.saveSettings({ [setting]: el.checked });
+    await refreshStatus();
+    if (state.view === "settings") renderSettings();
+  }
+}
+
+// ---------- page detection ----------
+
+async function detectCurrentPage({ manual = false, force = false } = {}) {
+  const seq = ++detectSeq;
+  const tab = await getActiveTab();
+
+  if (!tab?.url || !signalIsWebUrl(tab.url)) {
+    state.detect = { status: "unsupported", url: tab?.url || null, tabId: tab?.id ?? null, data: null, error: null, source: null };
+    renderDetectCard();
+    return;
+  }
+
+  state.detect = { status: "detecting", url: tab.url, tabId: tab.id, data: null, error: null, source: null };
+  renderDetectCard();
+
+  const res = await send({ type: "DETECT_PAGE", tabId: tab.id, url: tab.url, manual, force });
+  if (seq !== detectSeq) return; // user moved on; drop the stale result
+
+  if (!res?.success) {
+    state.detect.status = res?.code === "NO_API_KEY" ? "no-key" : "error";
+    state.detect.error = res?.error || "Detection failed.";
+  } else if (res.source === "unsupported") {
+    state.detect.status = "unsupported";
+  } else if (res.source === "manual-required") {
+    state.detect.status = "manual";
+  } else if (res.data?.is_researcher_page) {
+    state.detect.status = "detected";
+    state.detect.data = { ...res.data, url: tab.url };
+    state.detect.source = res.source;
+  } else {
+    state.detect.status = "none";
+    state.detect.source = res.source;
+  }
+  renderDetectCard();
+}
+
+function renderDetectCard() {
   const container = document.getElementById("page-card");
+  const d = state.detect;
+  const label = (text, extra = "") => `<div class="page-card-label"><span>${text}</span>${extra}</div>`;
+  const rescan = `<button class="link-btn" data-action="rescan">Rescan</button>`;
 
-  if (state.detecting) {
-    container.innerHTML = `
-      <div class="page-card-label">Current Page</div>
-      <div class="detecting-row">
-        <div class="pulse"></div>
-        <span>Signal is analyzing this page…</span>
-      </div>`;
-    return;
-  }
+  switch (d.status) {
+    case "idle":
+    case "detecting":
+      container.innerHTML = `${label("Current Page")}
+        <div class="detecting-row"><div class="pulse"></div><span>Signal is analyzing this page…</span></div>`;
+      return;
 
-  if (!state.currentPage) {
-    container.innerHTML = `
-      <div class="page-card-label">Current Page</div>
-      <div class="detect-placeholder">No researcher or lab detected on this page.</div>`;
-    return;
-  }
+    case "unsupported":
+      container.innerHTML = `${label("Current Page")}
+        <div class="detect-placeholder">Signal can't read this page. Open a researcher's profile to get started.</div>`;
+      return;
 
-  const p = state.currentPage;
-  const alreadyBookmarked = state.bookmarks.some(b => b.url === p.url);
+    case "no-key":
+      container.innerHTML = `${label("Setup needed")}
+        <div class="detect-placeholder">Add your TinyFish API key to detect researchers. Google Scholar profiles are read for free without one.</div>
+        <div class="detect-actions"><button class="btn primary small" data-action="open-settings">Add API key</button></div>`;
+      return;
 
-  container.innerHTML = `
-    <div class="page-card-label">Detected on this page</div>
-    <div class="page-detect-row">
-      <div class="detect-info">
-        <div class="detect-name">${esc(p.researcher_name || "Unknown Researcher")}</div>
-        <div class="detect-institution">${esc(p.institution || "")}${p.department ? " · " + esc(p.department) : ""}</div>
-        ${p.research_areas?.length ? `<div class="detect-tags">${p.research_areas.slice(0,3).map(a => `<span class="tag">${esc(a)}</span>`).join("")}</div>` : ""}
-        ${p.profile_summary ? `<div class="detect-summary">${esc(p.profile_summary)}</div>` : ""}
-      </div>
-      <button class="bookmark-btn ${alreadyBookmarked ? "bookmarked" : ""}" id="bookmark-btn" ${alreadyBookmarked ? "disabled" : ""}>
-        ${alreadyBookmarked ? "✓ Tracked" : "+ Track"}
-      </button>
-    </div>`;
+    case "error":
+      container.innerHTML = `${label("Current Page", rescan)}
+        <div class="detect-placeholder" style="color:var(--red)">${esc(d.error)}</div>`;
+      return;
 
-  if (!alreadyBookmarked) {
-    document.getElementById("bookmark-btn")?.addEventListener("click", bookmarkCurrent);
+    case "manual":
+      container.innerHTML = `${label("Current Page")}
+        <div class="detect-placeholder">Signal only auto-scans academic sites. Scan this page for a researcher?</div>
+        <div class="detect-actions">
+          <button class="btn small" data-action="scan-page">Scan this page</button>
+          <span class="cost-hint">Uses one TinyFish run</span>
+        </div>`;
+      return;
+
+    case "none":
+      container.innerHTML = `${label("Current Page", rescan)}
+        <div class="detect-placeholder">No researcher or lab detected on this page.</div>
+        <div class="detect-actions">
+          <button class="btn ghost small" data-action="scan-page">Scan anyway</button>
+          <span class="cost-hint">Uses one TinyFish run</span>
+        </div>`;
+      return;
+
+    case "detected": {
+      const p = d.data;
+      const tracked = state.bookmarks.some((b) => b.url === p.url || (p.scholar_url && b.scholar_url === p.scholar_url));
+      const sourceNote = d.source === "page" ? "Read from page · free" : d.source === "cache" ? "Cached result" : "";
+      container.innerHTML = `${label("Detected on this page", `<span class="cost-hint">${esc(sourceNote)}</span>`)}
+        <div class="page-detect-row">
+          <div class="detect-info">
+            <div class="detect-name">${esc(p.researcher_name || "Unknown Researcher")}</div>
+            <div class="detect-institution">${esc(p.institution || "")}${p.department ? " · " + esc(p.department) : ""}</div>
+            ${p.research_areas?.length ? `<div class="detect-tags">${p.research_areas.slice(0, 3).map((a) => `<span class="tag">${esc(a)}</span>`).join("")}</div>` : ""}
+            ${p.profile_summary ? `<div class="detect-summary">${esc(p.profile_summary)}</div>` : ""}
+          </div>
+          <button class="btn ${tracked ? "success" : "primary"}" data-action="track" ${tracked ? "disabled" : ""}>
+            ${tracked ? "✓ Tracked" : "+ Track"}
+          </button>
+        </div>`;
+      return;
+    }
   }
 }
 
-// BOOKMARK
-async function bookmarkCurrent() {
-  if (!state.currentPage) return;
-  const btn = document.getElementById("bookmark-btn");
+// ---------- tracking ----------
+
+async function trackCurrent() {
+  const p = state.detect.data;
+  if (!p) return;
+  const btn = document.querySelector("[data-action='track']");
   if (btn) { btn.disabled = true; btn.textContent = "Tracking…"; }
 
   const researcher = {
     id: Date.now().toString(),
-    name: state.currentPage.researcher_name || "Unknown",
-    institution: state.currentPage.institution || "",
-    department: state.currentPage.department || "",
-    research_areas: state.currentPage.research_areas || [],
-    scholar_url: state.currentPage.scholar_url || null,
-    url: state.currentPage.url,
+    name: p.researcher_name || "Unknown",
+    institution: p.institution || "",
+    department: p.department || "",
+    research_areas: p.research_areas || [],
+    scholar_url: p.scholar_url || null,
+    url: p.url,
     bookmarked_at: new Date().toISOString(),
     intelligence: null,
     lastChecked: null,
+    lastError: null,
     hasNew: false,
   };
 
-  state.bookmarks.push(researcher);
-  await chrome.storage.local.set({ bookmarks: state.bookmarks });
-  state.agentSteps[researcher.id] = [];
-  updateDetectCard();
+  await SignalStore.saveBookmark(researcher);
+  await loadBookmarks();
+  renderDetectCard();
 
-  state.activeResearcher = { ...researcher, _loading: true };
+  state.activeId = researcher.id;
   state.view = "researcher";
+  clearNavHighlight();
+  startScan(researcher.id);
+}
+
+async function startScan(id) {
+  state.loading.add(id);
+  state.agentSteps[id] = [];
   renderView();
 
-  fetchAndStoreIntelligence(researcher.id);
+  const res = await send({ type: "FETCH_INTELLIGENCE", researcherId: id });
+  state.loading.delete(id);
+  if (!res?.success && res?.code === "NO_API_KEY") await refreshStatus();
+  await loadBookmarks();
+  renderView();
 }
 
-// FETCH INTELLIGENCE
-async function fetchAndStoreIntelligence(researcherId) {
-  const { bookmarks = [] } = await chrome.storage.local.get("bookmarks");
-  const researcher = bookmarks.find(b => b.id === researcherId);
-  if (!researcher) return;
-
-  const result = await chrome.runtime.sendMessage({
-    type: "FETCH_INTELLIGENCE",
-    researcher,
-    researcherId,
-  });
-
-  const { bookmarks: current = [] } = await chrome.storage.local.get("bookmarks");
-  const updated = current.map(b =>
-    b.id === researcherId
-      ? {
-          ...b,
-          intelligence: result?.data || null,
-          lastChecked: new Date().toISOString(),
-          hasNew: false,
-          _error: (!result?.success && result?.error) ? result.error : null,
-        }
-      : b
-  );
-
-  await chrome.storage.local.set({ bookmarks: updated });
-  state.bookmarks = updated;
-
-  if (state.activeResearcher?.id === researcherId) {
-    state.activeResearcher = updated.find(b => b.id === researcherId);
-    renderFeed();
-  }
+async function removeBookmark(id) {
+  const r = state.bookmarks.find((b) => b.id === id);
+  if (!r) return;
+  if (!confirm(`Stop tracking ${r.name}?`)) return;
+  await SignalStore.removeBookmark(id);
+  await loadBookmarks();
+  if (state.activeId === id) { state.activeId = null; state.view = "feed"; }
+  renderView();
+  if (state.detect.status === "detected") renderDetectCard();
 }
 
-// VIEWS
+// ---------- views ----------
+
+function clearNavHighlight() {
+  document.querySelectorAll(".nav-btn").forEach((b) => b.classList.remove("active"));
+}
+
 function showView(view) {
   state.view = view;
-  state.activeResearcher = null;
-  document.querySelectorAll(".nav-btn").forEach(b => b.classList.remove("active"));
+  state.activeId = null;
+  clearNavHighlight();
   document.getElementById(`nav-${view}`)?.classList.add("active");
   renderView();
 }
@@ -211,53 +291,69 @@ function showView(view) {
 function renderView() {
   if (state.view === "feed") renderFeedList();
   else if (state.view === "bookmarks") renderBookmarksList();
-  else if (state.view === "researcher") renderFeed();
+  else if (state.view === "researcher") renderResearcher();
+  else if (state.view === "settings") renderSettings();
 }
 
-// FEED LIST
+function activeResearcher() {
+  return state.bookmarks.find((b) => b.id === state.activeId) || null;
+}
+
+function statusBadge(r) {
+  if (state.loading.has(r.id)) return `<span class="rc-badge scanning">Scanning…</span>`;
+  if (r.hasNew) return `<span class="rc-badge new">New</span>`;
+  if (r.lastError && !r.intelligence) return `<span class="rc-badge warn">Failed</span>`;
+  if (!r.intelligence) return `<span class="rc-badge idle">Not scanned</span>`;
+  return `<span class="rc-badge ok">✓</span>`;
+}
+
 function renderFeedList() {
   const content = document.getElementById("main-content");
+  let html = "";
+
+  if (!state.status.hasKey && !state.status.mock) {
+    html += `<div class="notice">Signal needs your TinyFish API key to scan researchers.
+      <button class="link-btn" data-action="open-settings">Add it in Settings</button>.</div>`;
+  }
+
   if (!state.bookmarks.length) {
-    content.innerHTML = `
+    content.innerHTML = html + `
       <div class="empty-state">
         <div class="empty-icon">🔬</div>
         <div class="empty-title">No researchers tracked yet</div>
-        <div class="empty-desc">Navigate to a researcher or lab page and click <strong>+ Track</strong> to start receiving intelligence.</div>
+        <div class="empty-desc">Open a researcher's Google Scholar or university profile and click <strong>+ Track</strong> to start receiving intelligence.</div>
       </div>`;
     return;
   }
 
-  content.innerHTML = `
-    <div class="section-title">Tracked Researchers</div>
-    ${state.bookmarks.map(r => {
-      const paperCount = r.intelligence?.recent_papers?.length || 0;
-      const grantCount = r.intelligence?.grants?.length || 0;
-      const isLoading = !r.intelligence && !r._error;
-      return `
-        <div class="researcher-card ${r.hasNew ? "active" : ""}" data-action="open-researcher" data-id="${r.id}">
-          <div class="rc-top">
-            <div>
-              <div class="rc-name">${esc(r.name)}</div>
-              <div class="rc-institution">${esc(r.institution)}</div>
-            </div>
-            ${isLoading
-              ? `<span class="rc-badge" style="color:var(--accent2);background:rgba(124,106,247,0.15)">Scanning…</span>`
-              : r.hasNew
-                ? `<span class="rc-badge new">New</span>`
-                : `<span class="rc-badge ok">✓</span>`}
+  html += `<div class="section-title">Tracked Researchers</div>`;
+  html += state.bookmarks.map((r) => {
+    const paperCount = r.intelligence?.recent_papers?.length || 0;
+    const grantCount = r.intelligence?.grants?.length || 0;
+    const scanning = state.loading.has(r.id);
+    return `
+      <div class="researcher-card ${r.hasNew ? "active" : ""}" data-action="open-researcher" data-id="${esc(r.id)}">
+        <div class="rc-top">
+          <div>
+            <div class="rc-name">${esc(r.name)}</div>
+            <div class="rc-institution">${esc(r.institution)}</div>
           </div>
-          <div class="rc-meta">
-            ${isLoading
-              ? `<div class="rc-stat" style="color:var(--muted)">TinyFish agents searching…</div>`
-              : `<div class="rc-stat">Papers <span>${paperCount}</span></div>
-                 <div class="rc-stat">Grants <span>${grantCount}</span></div>
-                 ${r.lastChecked ? `<div class="rc-stat">Updated <span>${timeAgo(r.lastChecked)}</span></div>` : ""}`}
-          </div>
-        </div>`;
-    }).join("")}`;
+          ${statusBadge(r)}
+        </div>
+        <div class="rc-meta">
+          ${scanning
+            ? `<div class="rc-stat">TinyFish agents searching…</div>`
+            : r.intelligence
+              ? `<div class="rc-stat">Papers <span>${esc(paperCount)}</span></div>
+                 <div class="rc-stat">Grants <span>${esc(grantCount)}</span></div>
+                 ${r.lastChecked ? `<div class="rc-stat">Updated <span>${esc(timeAgo(r.lastChecked))}</span></div>` : ""}`
+              : `<div class="rc-stat">${r.lastError ? "Last scan failed · open to retry" : "Open to run the first scan"}</div>`}
+        </div>
+      </div>`;
+  }).join("");
+  content.innerHTML = html;
 }
 
-// BOOKMARKS LIST
 function renderBookmarksList() {
   const content = document.getElementById("main-content");
   if (!state.bookmarks.length) {
@@ -265,51 +361,47 @@ function renderBookmarksList() {
       <div class="empty-state">
         <div class="empty-icon">📌</div>
         <div class="empty-title">Nothing tracked yet</div>
+        <div class="empty-desc">Tracked researchers sync across every Chrome where you're signed in.</div>
       </div>`;
     return;
   }
 
   content.innerHTML = `
     <div class="section-title">All Tracked (${state.bookmarks.length})</div>
-    ${state.bookmarks.map(r => `
-      <div class="researcher-card" data-action="open-researcher" data-id="${r.id}">
+    ${state.bookmarks.map((r) => `
+      <div class="researcher-card" data-action="open-researcher" data-id="${esc(r.id)}">
         <div class="rc-top">
           <div>
             <div class="rc-name">${esc(r.name)}</div>
             <div class="rc-institution">${esc(r.institution)}${r.department ? " · " + esc(r.department) : ""}</div>
           </div>
-          <button data-action="remove-bookmark" data-id="${r.id}"
-            style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;padding:2px 6px;line-height:1;">×</button>
+          <button class="rc-remove" data-action="remove-bookmark" data-id="${esc(r.id)}" title="Stop tracking" aria-label="Stop tracking">×</button>
         </div>
-        ${r.research_areas?.length ? `<div class="detect-tags" style="margin-top:6px;">${r.research_areas.slice(0,3).map(a=>`<span class="tag">${esc(a)}</span>`).join("")}</div>` : ""}
+        ${r.research_areas?.length ? `<div class="detect-tags" style="margin-top:6px;">${r.research_areas.slice(0, 3).map((a) => `<span class="tag">${esc(a)}</span>`).join("")}</div>` : ""}
         <div class="rc-meta" style="margin-top:6px;">
-          <div class="rc-stat">Tracked since <span>${formatDate(r.bookmarked_at)}</span></div>
+          <div class="rc-stat">Tracked since <span>${esc(formatDate(r.bookmarked_at))}</span></div>
         </div>
       </div>`).join("")}`;
 }
 
-// RESEARCHER FEED
 function openResearcher(id) {
-  const researcher = state.bookmarks.find(b => b.id === id);
-  if (!researcher) return;
-  state.activeResearcher = researcher;
+  const r = state.bookmarks.find((b) => b.id === id);
+  if (!r) return;
+  state.activeId = id;
   state.view = "researcher";
-  document.querySelectorAll(".nav-btn").forEach(b => b.classList.remove("active"));
-  if (researcher.hasNew) {
-    state.bookmarks = state.bookmarks.map(b => b.id === id ? { ...b, hasNew: false } : b);
-    chrome.storage.local.set({ bookmarks: state.bookmarks });
-  }
-  renderFeed();
+  clearNavHighlight();
+  if (r.hasNew) SignalStore.updateBookmark(id, { hasNew: false }); // storage listener re-renders
+  renderResearcher();
 }
 
-function renderFeed() {
+function renderResearcher() {
   const content = document.getElementById("main-content");
-  const r = state.activeResearcher;
-  if (!r) return;
+  const r = activeResearcher();
+  if (!r) { showView("feed"); return; }
 
   const intel = r.intelligence;
   const steps = state.agentSteps[r.id] || [];
-  const isLoading = r._loading || (!intel && !r._error);
+  const isLoading = state.loading.has(r.id);
 
   let html = `
     <div class="feed-header">
@@ -317,123 +409,108 @@ function renderFeed() {
         <div class="feed-name">${esc(r.name)}</div>
         <div class="feed-inst">${esc(r.institution)}</div>
       </div>
-      <button class="back-btn" data-action="back">← Back</button>
+      <button class="btn ghost small" data-action="back">← Back</button>
     </div>
-    <div style="display:flex;gap:6px;margin-bottom:12px;">
-      <button data-action="refresh-researcher" data-id="${r.id}" class="refresh-btn" style="flex:1;">
-        ↻ Refresh
-      </button>
-      <button data-action="test-notification" data-id="${r.id}" class="refresh-btn" style="flex:1;border-color:var(--accent);color:var(--accent2);" title="Simulate a new paper notification">
-        🔔 Test Alert
-      </button>
+    <div class="action-row">
+      <button class="btn small" data-action="refresh-researcher" data-id="${esc(r.id)}" ${isLoading ? "disabled" : ""}>↻ Refresh</button>
+      ${state.status.developerMode
+        ? `<button class="btn small" data-action="test-notification" data-id="${esc(r.id)}" style="border-color:var(--accent);color:var(--accent2);" title="Simulate a new-paper notification">🔔 Test Alert</button>`
+        : ""}
     </div>`;
 
-  // Live agent activity log (always show while loading, collapse after)
   if (isLoading || steps.length > 0) {
     html += `
       <div class="agent-log ${isLoading ? "active" : "done"}">
         <div class="agent-log-header">
-          ${isLoading
-            ? `<div class="pulse"></div><span>TinyFish agents are running…</span>`
-            : `<span style="color:var(--green)">✓ Scan complete</span>`}
+          ${isLoading ? `<div class="pulse"></div><span>TinyFish agents are running…</span>` : `<span style="color:var(--green)">✓ Scan complete</span>`}
         </div>
-        <div class="agent-log-steps" id="agent-steps-${r.id}">
+        <div class="agent-log-steps" id="agent-steps-${esc(r.id)}">
           ${steps.length === 0
             ? `<div class="agent-step">⚡ Dispatching agents to Google Scholar, arXiv, grant databases…</div>`
-            : steps.map(s => `<div class="agent-step">${esc(s)}</div>`).join("")}
+            : steps.map((s) => `<div class="agent-step">${esc(s)}</div>`).join("")}
           ${isLoading ? `<div class="agent-step blink">▍</div>` : ""}
         </div>
       </div>`;
   }
 
-  if (isLoading) {
-    if (!r._fetchStarted) {
-      state.activeResearcher = { ...r, _fetchStarted: true };
-      fetchAndStoreIntelligence(r.id);
+  if (isLoading) { content.innerHTML = html; return; }
+
+  if (r.lastError) html += `<div class="error-msg">⚠ ${esc(r.lastError)}</div>`;
+
+  if (!intel) {
+    if (!r.lastError) {
+      html += `<div class="notice">${r.intelligence_local_only
+        ? "This researcher's data was too large to sync. Refresh to scan on this device."
+        : "Not scanned yet. Click Refresh to run the first scan."}</div>`;
     }
     content.innerHTML = html;
     return;
   }
 
-  if (r._error) {
-    html += `<div class="error-msg">⚠ ${esc(r._error)}</div>`;
-    content.innerHTML = html;
-    return;
-  }
-
-  if (!intel) {
-    content.innerHTML = html;
-    return;
-  }
-
-  // Papers
   if (intel.recent_papers?.length) {
     html += `<div class="section-title">📄 Recent Papers</div>`;
-    intel.recent_papers.forEach(p => {
+    for (const p of intel.recent_papers) {
       html += `
         <div class="signal-card">
-          <div class="signal-card-type paper">Paper · ${p.year || ""}</div>
-          <div class="signal-title">${p.url ? `<a href="${esc(p.url)}" target="_blank">${esc(p.title)}</a>` : esc(p.title)}</div>
-          ${p.citations ? `<div class="signal-meta">${p.citations} citations</div>` : ""}
+          <div class="signal-card-type paper">Paper${p.year ? " · " + esc(p.year) : ""}</div>
+          <div class="signal-title">${safeHref(p.url) ? `<a href="${safeHref(p.url)}" target="_blank" rel="noopener">${esc(p.title)}</a>` : esc(p.title)}</div>
+          ${p.citations ? `<div class="signal-meta">${esc(p.citations)} citations</div>` : ""}
           ${p.summary ? `<div class="signal-summary">${esc(p.summary)}</div>` : ""}
         </div>`;
-    });
+    }
   }
 
-  // Citation spikes
   if (intel.citation_spikes?.length) {
     html += `<div class="section-title">📈 Citation Spikes</div>`;
-    intel.citation_spikes.forEach(p => {
+    for (const p of intel.citation_spikes) {
       html += `
         <div class="signal-card">
           <div class="signal-card-type citation">Citation Spike</div>
           <div class="signal-title">${esc(p.title)}</div>
-          <div class="signal-meta">${p.total_citations} citations · ${esc(p.spike_note)}</div>
+          <div class="signal-meta">${p.total_citations ? esc(p.total_citations) + " citations · " : ""}${esc(p.spike_note)}</div>
         </div>`;
-    });
+    }
   }
 
-  // Grants
   if (intel.grants?.length) {
     html += `<div class="section-title">💰 Grants & Funding</div>`;
-    intel.grants.forEach(g => {
+    for (const g of intel.grants) {
       html += `
         <div class="signal-card">
-          <div class="signal-card-type grant">Grant · ${esc(g.funder || "")}</div>
+          <div class="signal-card-type grant">Grant${g.funder ? " · " + esc(g.funder) : ""}</div>
           <div class="signal-title">${esc(g.title)}</div>
-          <div class="signal-meta">${g.year ? g.year + " · " : ""}${esc(g.amount || "")}</div>
+          <div class="signal-meta">${g.year ? esc(g.year) + " · " : ""}${esc(g.amount || "")}</div>
         </div>`;
-    });
+    }
   }
 
-  // Patents
   if (intel.patents?.length) {
     html += `<div class="section-title">⚙ Patents</div>`;
-    intel.patents.forEach(p => {
+    for (const p of intel.patents) {
       html += `
         <div class="signal-card">
-          <div class="signal-card-type patent">Patent${p.year ? " · " + p.year : ""}</div>
+          <div class="signal-card-type patent">Patent${p.year ? " · " + esc(p.year) : ""}</div>
           <div class="signal-title">${esc(p.title)}</div>
           ${p.patent_number ? `<div class="signal-meta">${esc(p.patent_number)}</div>` : ""}
         </div>`;
-    });
+    }
   }
 
-  // Collaborations
   if (intel.collaborations?.length) {
     html += `<div class="section-title">🤝 Collaborations</div>`;
-    intel.collaborations.forEach(c => {
+    for (const c of intel.collaborations) {
       html += `
         <div class="signal-card">
           <div class="signal-card-type collab">Collaboration</div>
           <div class="signal-title">${esc(c.partner)}</div>
-          <div class="signal-summary">${esc(c.description)}</div>
+          ${c.description ? `<div class="signal-summary">${esc(c.description)}</div>` : ""}
         </div>`;
-    });
+    }
   }
 
-  if (!intel.recent_papers?.length && !intel.citation_spikes?.length &&
-      !intel.grants?.length && !intel.patents?.length && !intel.collaborations?.length) {
+  const empty = !intel.recent_papers?.length && !intel.citation_spikes?.length &&
+    !intel.grants?.length && !intel.patents?.length && !intel.collaborations?.length;
+  if (empty) {
     html += `
       <div class="empty-state">
         <div class="empty-icon">🔍</div>
@@ -442,92 +519,175 @@ function renderFeed() {
       </div>`;
   }
 
-  if (intel.last_checked) {
-    html += `<div style="text-align:center;color:var(--muted);font-size:10px;margin:16px 0 8px;">Last checked ${formatDate(intel.last_checked)}</div>`;
-  }
-
+  if (r.lastChecked) html += `<div class="footnote">Last checked ${esc(formatDate(r.lastChecked))}</div>`;
   content.innerHTML = html;
 }
 
-// Patch live agent log without re-rendering the whole feed
 function updateAgentLog(steps) {
-  const r = state.activeResearcher;
+  const r = activeResearcher();
   if (!r) return;
   const el = document.getElementById(`agent-steps-${r.id}`);
-  if (!el) { renderFeed(); return; }
-  el.innerHTML = steps.map(s => `<div class="agent-step">${esc(s)}</div>`).join("") +
-    `<div class="agent-step blink">▍</div>`;
+  if (!el) { renderResearcher(); return; }
+  el.innerHTML = steps.map((s) => `<div class="agent-step">${esc(s)}</div>`).join("") + `<div class="agent-step blink">▍</div>`;
   el.scrollTop = el.scrollHeight;
 }
 
-// ACTIONS
+// ---------- settings ----------
+
+async function renderSettings() {
+  const content = document.getElementById("main-content");
+  const settings = await SignalStore.getSettings();
+  if (state.view !== "settings") return;
+
+  content.innerHTML = `
+    <div class="feed-header">
+      <div class="feed-name">Settings</div>
+      <button class="btn ghost small" data-action="back">← Back</button>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-label">TinyFish API key</div>
+      <div class="input-row">
+        <input class="text-input" type="password" id="api-key-input" placeholder="Paste your API key" value="${esc(settings.apiKey)}" autocomplete="off" spellcheck="false" />
+        <button class="btn small" data-action="toggle-key-visibility" title="Show or hide">👁</button>
+      </div>
+      <div class="input-row" style="margin-top:8px;">
+        <button class="btn primary small" data-action="save-key">Save</button>
+        <button class="btn small" data-action="test-key">Test connection</button>
+      </div>
+      <div class="status-line" id="key-status"></div>
+      <div class="hint">
+        Stored only on this device and sent only to TinyFish. Each detection and scan runs on your TinyFish account.
+        Get a key at <a href="${esc(SIGNAL.TINYFISH_KEYS_URL)}" target="_blank" rel="noopener">agent.tinyfish.ai/api-keys</a>.
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-label">Detection</div>
+      <div class="hint" style="margin-top:0;">
+        Signal auto-detects on Google Scholar, ORCID, ResearchGate, Semantic Scholar, arXiv, dblp, OpenReview, and university domains.
+        Everywhere else you choose when to scan. Results are cached for 7 days.
+      </div>
+      <div class="input-row" style="margin-top:10px;">
+        <button class="btn small" data-action="clear-cache">Clear detection cache</button>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-label">Advanced</div>
+      <div class="toggle-row">
+        <label for="dev-mode">Developer mode</label>
+        <input type="checkbox" id="dev-mode" data-setting="developerMode" ${settings.developerMode ? "checked" : ""} />
+      </div>
+      ${settings.developerMode ? `
+        <div class="toggle-row">
+          <label for="mock-mode">Mock mode <span class="cost-hint">(fake data, no API calls)</span></label>
+          <input type="checkbox" id="mock-mode" data-setting="mockMode" ${settings.mockMode ? "checked" : ""} />
+        </div>
+        <div class="input-row" style="margin-top:8px;">
+          <button class="btn small" data-action="run-daily">Run daily check now</button>
+        </div>
+        <div class="hint">Developer mode also shows the Test Alert button on each researcher.</div>
+      ` : ""}
+    </div>
+
+    <div class="settings-footer">
+      Signal v${esc(SIGNAL.VERSION)}<br/>
+      <a href="${esc(SIGNAL.PRIVACY_URL)}" target="_blank" rel="noopener">Privacy policy</a> ·
+      <a href="${esc(SIGNAL.SOURCE_URL)}" target="_blank" rel="noopener">Source</a>
+    </div>`;
+}
+
+function setKeyStatus(text, ok) {
+  const el = document.getElementById("key-status");
+  if (!el) return;
+  el.textContent = text;
+  el.className = `status-line ${ok ? "ok" : "err"}`;
+}
+
+async function saveApiKey() {
+  const input = document.getElementById("api-key-input");
+  const apiKey = (input?.value || "").trim();
+  await SignalStore.saveSettings({ apiKey });
+  await refreshStatus();
+  setKeyStatus(apiKey ? "Saved." : "Key removed.", true);
+  if (state.detect.status === "no-key" && apiKey) detectCurrentPage({ force: true });
+}
+
+async function testApiKey() {
+  const input = document.getElementById("api-key-input");
+  const apiKey = (input?.value || "").trim();
+  if (!apiKey) { setKeyStatus("Enter an API key first.", false); return; }
+  setKeyStatus("Checking…", true);
+
+  const res = await send({ type: "TEST_CONNECTION", apiKey });
+  if (!res?.success) { setKeyStatus(res?.error || "Connection failed.", false); return; }
+  if (res.note) { setKeyStatus(res.note, true); return; }
+  const balance = res.balance != null ? ` Wallet balance: ${formatMoney(res.balance, res.currency)}.` : "";
+  setKeyStatus(`Connected.${balance}`, true);
+}
+
+async function clearDetectionCache(btn) {
+  await send({ type: "CLEAR_DETECT_CACHE" });
+  flashButton(btn, "✓ Cleared", "Clear detection cache");
+  detectCurrentPage({ force: true });
+}
+
+async function runDailyNow(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = "Running…"; }
+  const res = await send({ type: "RUN_DAILY_CHECK" });
+  const summary = res?.success ? `✓ ${res.checked} checked, ${res.skipped} skipped, ${res.failed} failed` : "⚠ Failed";
+  flashButton(btn, summary, "Run daily check now", 4000);
+  await loadBookmarks();
+}
+
 async function triggerTestNotification(id) {
   const btn = document.querySelector(`[data-action="test-notification"][data-id="${id}"]`);
   if (btn) { btn.disabled = true; btn.textContent = "Running…"; }
-
-  const result = await chrome.runtime.sendMessage({
-    type: "TEST_NOTIFICATION",
-    researcherId: id,
-  });
-
-  if (btn) {
-    if (result?.success) {
-      btn.textContent = "✓ Sent!";
-      btn.style.borderColor = "var(--green)";
-      btn.style.color = "var(--green)";
-    } else {
-      btn.textContent = "⚠ Failed";
-      btn.style.borderColor = "var(--red)";
-      btn.style.color = "var(--red)";
-    }
-    setTimeout(() => {
-      btn.disabled = false;
-      btn.textContent = "🔔 Test Alert";
-      btn.style.borderColor = "var(--accent)";
-      btn.style.color = "var(--accent2)";
-    }, 3000);
-  }
-
-  // Reload bookmarks to reflect hasNew flag
+  const res = await send({ type: "TEST_NOTIFICATION", researcherId: id });
+  flashButton(btn, res?.success ? "✓ Sent!" : `⚠ ${res?.error || "Failed"}`, "🔔 Test Alert");
   await loadBookmarks();
-  renderFeedList();
+  if (state.view === "researcher") renderResearcher();
 }
 
-async function refreshResearcher(id) {
-  await loadBookmarks();
-  const researcher = state.bookmarks.find(b => b.id === id);
-  if (!researcher) return;
-  state.agentSteps[id] = [];
-  state.activeResearcher = { ...researcher, _loading: true, _fetchStarted: false, intelligence: null, _error: null };
-  renderFeed();
-  fetchAndStoreIntelligence(id);
+function flashButton(btn, text, original, ms = 3000) {
+  if (!btn) return;
+  btn.disabled = true;
+  btn.textContent = text;
+  setTimeout(() => { btn.disabled = false; btn.textContent = original; }, ms);
 }
 
-async function removeBookmark(id) {
-  state.bookmarks = state.bookmarks.filter(b => b.id !== id);
-  await chrome.storage.local.set({ bookmarks: state.bookmarks });
-  renderView();
+// ---------- utils ----------
+
+function esc(value) {
+  if (value === null || value === undefined) return "";
+  return String(value)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
-chrome.tabs.onActivated.addListener(() => detectCurrentPage());
-chrome.tabs.onUpdated.addListener((_, changeInfo) => {
-  if (changeInfo.status === "complete") detectCurrentPage();
-});
-
-// UTILS
-function esc(str) {
-  if (!str) return "";
-  return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+// Only http(s) links may be rendered as anchors.
+function safeHref(url) {
+  if (typeof url !== "string" || !/^https?:\/\//i.test(url)) return "";
+  return esc(url);
 }
+
 function timeAgo(iso) {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
+  const mins = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60000));
   if (mins < 60) return `${mins}m ago`;
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h ago`;
   return `${Math.floor(hrs / 24)}d ago`;
 }
+
 function formatDate(iso) {
   if (!iso) return "";
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function formatMoney(value, currency) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return `${value} ${currency || ""}`.trim();
+  try { return n.toLocaleString("en-US", { style: "currency", currency: currency || "USD" }); }
+  catch (_) { return `${n.toFixed(2)} ${currency || ""}`.trim(); }
 }

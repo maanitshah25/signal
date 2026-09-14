@@ -1,44 +1,75 @@
 {
-    "manifest_version": 3,
-    "name": "Signal – Research Intelligence Tracker",
-    "version": "1.0.0",
-    "description": "Bookmark any researcher or lab with one click and receive an automatic intelligence feed of papers, citations, grants, and patents.",
-    "permissions": [
-      "sidePanel",
-      "storage",
-      "tabs",
-      "alarms",
-      "notifications",
-      "activeTab",
-      "scripting"
-    ],
-    "host_permissions": [
-      "<all_urls>"
-    ],
-    "background": {
-      "service_worker": "background.js"
-    },
-    "side_panel": {
-      "default_path": "sidepanel.html"
-    },
-    "action": {
-      "default_title": "Open Signal",
-      "default_icon": {
-        "16": "icons/icon16.png",
-        "48": "icons/icon48.png",
-        "128": "icons/icon128.png"
-      }
-    },
-    "icons": {
+  "manifest_version": 3,
+  "name": "Signal – Research Intelligence Tracker",
+  "version": "1.1.0",
+  "description": "Track any researcher with one click and get a feed of their new papers, citation spikes, grants, and patents. Uses your own TinyFish API key.",
+  "minimum_chrome_version": "114",
+  "homepage_url": "https://github.com/maanitshah25/signal",
+  "permissions": [
+    "sidePanel",
+    "storage",
+    "tabs",
+    "alarms",
+    "notifications",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://agent.tinyfish.ai/*",
+    "https://scholar.google.com/*",
+    "https://orcid.org/*",
+    "https://*.researchgate.net/*",
+    "https://*.semanticscholar.org/*",
+    "https://*.arxiv.org/*",
+    "https://dblp.org/*",
+    "https://dblp.uni-trier.de/*",
+    "https://*.openreview.net/*",
+    "*://*.edu/*",
+    "*://*.ac.uk/*",
+    "*://*.ac.jp/*",
+    "*://*.ac.in/*",
+    "*://*.ac.kr/*",
+    "*://*.ac.il/*",
+    "*://*.ac.nz/*",
+    "*://*.ac.za/*",
+    "*://*.ac.at/*",
+    "*://*.ac.be/*",
+    "*://*.ac.cn/*",
+    "*://*.ac.ir/*",
+    "*://*.ac.id/*",
+    "*://*.ac.th/*",
+    "*://*.ac.ae/*",
+    "*://*.edu.au/*",
+    "*://*.edu.cn/*",
+    "*://*.edu.sg/*",
+    "*://*.edu.hk/*",
+    "*://*.edu.tw/*",
+    "*://*.edu.in/*",
+    "*://*.edu.br/*",
+    "*://*.edu.mx/*",
+    "*://*.edu.co/*",
+    "*://*.edu.ar/*",
+    "*://*.edu.tr/*",
+    "*://*.edu.pk/*",
+    "*://*.edu.my/*",
+    "*://*.edu.sa/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "action": {
+    "default_title": "Open Signal",
+    "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
-    },
-    "content_scripts": [
-      {
-        "matches": ["<all_urls>"],
-        "js": ["content.js"],
-        "run_at": "document_idle"
-      }
-    ]
-  }  
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
