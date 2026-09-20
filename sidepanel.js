@@ -94,7 +94,11 @@ function onDelegatedClick(e) {
     case "test-key": return testApiKey();
     case "toggle-key-visibility": {
       const input = document.getElementById("api-key-input");
-      if (input) input.type = input.type === "password" ? "text" : "password";
+      if (input) {
+        const showing = input.type === "text";
+        input.type = showing ? "password" : "text";
+        el.textContent = showing ? "Show" : "Hide";
+      }
       return;
     }
     case "clear-cache": return clearDetectionCache(el);
@@ -160,7 +164,7 @@ function renderDetectCard() {
     case "idle":
     case "detecting":
       container.innerHTML = `${label("Current Page")}
-        <div class="detecting-row"><div class="pulse"></div><span>Signal is analyzing this page…</span></div>`;
+        <div class="detecting-row"><div class="status-dot"></div><span>Checking this page</span></div>`;
       return;
 
     case "unsupported":
@@ -200,17 +204,17 @@ function renderDetectCard() {
     case "detected": {
       const p = d.data;
       const tracked = state.bookmarks.some((b) => b.url === p.url || (p.scholar_url && b.scholar_url === p.scholar_url));
-      const sourceNote = d.source === "page" ? "Read from page · free" : d.source === "cache" ? "Cached result" : "";
+      const sourceNote = d.source === "page" ? "Read locally, no API call" : d.source === "cache" ? "Cached result" : "";
       container.innerHTML = `${label("Detected on this page", `<span class="cost-hint">${esc(sourceNote)}</span>`)}
         <div class="page-detect-row">
           <div class="detect-info">
             <div class="detect-name">${esc(p.researcher_name || "Unknown Researcher")}</div>
-            <div class="detect-institution">${esc(p.institution || "")}${p.department ? " · " + esc(p.department) : ""}</div>
+            <div class="detect-institution">${esc(p.institution || "")}${p.department ? " | " + esc(p.department) : ""}</div>
             ${p.research_areas?.length ? `<div class="detect-tags">${p.research_areas.slice(0, 3).map((a) => `<span class="tag">${esc(a)}</span>`).join("")}</div>` : ""}
             ${p.profile_summary ? `<div class="detect-summary">${esc(p.profile_summary)}</div>` : ""}
           </div>
           <button class="btn ${tracked ? "success" : "primary"}" data-action="track" ${tracked ? "disabled" : ""}>
-            ${tracked ? "✓ Tracked" : "+ Track"}
+            ${tracked ? "Tracked" : "Track"}
           </button>
         </div>`;
       return;
@@ -224,7 +228,7 @@ async function trackCurrent() {
   const p = state.detect.data;
   if (!p) return;
   const btn = document.querySelector("[data-action='track']");
-  if (btn) { btn.disabled = true; btn.textContent = "Tracking…"; }
+  if (btn) { btn.disabled = true; btn.textContent = "Adding"; }
 
   const researcher = {
     id: Date.now().toString(),
@@ -300,11 +304,11 @@ function activeResearcher() {
 }
 
 function statusBadge(r) {
-  if (state.loading.has(r.id)) return `<span class="rc-badge scanning">Scanning…</span>`;
+  if (state.loading.has(r.id)) return `<span class="rc-badge scanning">Updating</span>`;
   if (r.hasNew) return `<span class="rc-badge new">New</span>`;
   if (r.lastError && !r.intelligence) return `<span class="rc-badge warn">Failed</span>`;
   if (!r.intelligence) return `<span class="rc-badge idle">Not scanned</span>`;
-  return `<span class="rc-badge ok">✓</span>`;
+  return `<span class="rc-badge ok">Current</span>`;
 }
 
 function renderFeedList() {
@@ -319,9 +323,8 @@ function renderFeedList() {
   if (!state.bookmarks.length) {
     content.innerHTML = html + `
       <div class="empty-state">
-        <div class="empty-icon">🔬</div>
         <div class="empty-title">No researchers tracked yet</div>
-        <div class="empty-desc">Open a researcher's Google Scholar or university profile and click <strong>+ Track</strong> to start receiving intelligence.</div>
+        <div class="empty-desc">Open a researcher's Google Scholar or university profile, then select <strong>Track</strong>.</div>
       </div>`;
     return;
   }
@@ -342,12 +345,12 @@ function renderFeedList() {
         </div>
         <div class="rc-meta">
           ${scanning
-            ? `<div class="rc-stat">TinyFish agents searching…</div>`
+            ? `<div class="rc-stat">Updating research data</div>`
             : r.intelligence
               ? `<div class="rc-stat">Papers <span>${esc(paperCount)}</span></div>
                  <div class="rc-stat">Grants <span>${esc(grantCount)}</span></div>
                  ${r.lastChecked ? `<div class="rc-stat">Updated <span>${esc(timeAgo(r.lastChecked))}</span></div>` : ""}`
-              : `<div class="rc-stat">${r.lastError ? "Last scan failed · open to retry" : "Open to run the first scan"}</div>`}
+              : `<div class="rc-stat">${r.lastError ? "Last update failed. Open to retry." : "Open to run the first update."}</div>`}
         </div>
       </div>`;
   }).join("");
@@ -359,7 +362,6 @@ function renderBookmarksList() {
   if (!state.bookmarks.length) {
     content.innerHTML = `
       <div class="empty-state">
-        <div class="empty-icon">📌</div>
         <div class="empty-title">Nothing tracked yet</div>
         <div class="empty-desc">Tracked researchers sync across every Chrome where you're signed in.</div>
       </div>`;
@@ -373,7 +375,7 @@ function renderBookmarksList() {
         <div class="rc-top">
           <div>
             <div class="rc-name">${esc(r.name)}</div>
-            <div class="rc-institution">${esc(r.institution)}${r.department ? " · " + esc(r.department) : ""}</div>
+            <div class="rc-institution">${esc(r.institution)}${r.department ? " | " + esc(r.department) : ""}</div>
           </div>
           <button class="rc-remove" data-action="remove-bookmark" data-id="${esc(r.id)}" title="Stop tracking" aria-label="Stop tracking">×</button>
         </div>
@@ -409,12 +411,12 @@ function renderResearcher() {
         <div class="feed-name">${esc(r.name)}</div>
         <div class="feed-inst">${esc(r.institution)}</div>
       </div>
-      <button class="btn ghost small" data-action="back">← Back</button>
+      <button class="btn ghost small" data-action="back">Back</button>
     </div>
     <div class="action-row">
-      <button class="btn small" data-action="refresh-researcher" data-id="${esc(r.id)}" ${isLoading ? "disabled" : ""}>↻ Refresh</button>
+      <button class="btn small" data-action="refresh-researcher" data-id="${esc(r.id)}" ${isLoading ? "disabled" : ""}>Refresh</button>
       ${state.status.developerMode
-        ? `<button class="btn small" data-action="test-notification" data-id="${esc(r.id)}" style="border-color:var(--accent);color:var(--accent2);" title="Simulate a new-paper notification">🔔 Test Alert</button>`
+        ? `<button class="btn small" data-action="test-notification" data-id="${esc(r.id)}" style="border-color:var(--accent);color:var(--accent-strong);" title="Simulate a new-paper notification">Test alert</button>`
         : ""}
     </div>`;
 
@@ -422,20 +424,19 @@ function renderResearcher() {
     html += `
       <div class="agent-log ${isLoading ? "active" : "done"}">
         <div class="agent-log-header">
-          ${isLoading ? `<div class="pulse"></div><span>TinyFish agents are running…</span>` : `<span style="color:var(--green)">✓ Scan complete</span>`}
+          ${isLoading ? `<div class="status-dot"></div><span>Updating research data</span>` : `<span style="color:var(--green)">Update complete</span>`}
         </div>
         <div class="agent-log-steps" id="agent-steps-${esc(r.id)}">
           ${steps.length === 0
-            ? `<div class="agent-step">⚡ Dispatching agents to Google Scholar, arXiv, grant databases…</div>`
+            ? `<div class="agent-step">Starting research update</div>`
             : steps.map((s) => `<div class="agent-step">${esc(s)}</div>`).join("")}
-          ${isLoading ? `<div class="agent-step blink">▍</div>` : ""}
         </div>
       </div>`;
   }
 
   if (isLoading) { content.innerHTML = html; return; }
 
-  if (r.lastError) html += `<div class="error-msg">⚠ ${esc(r.lastError)}</div>`;
+  if (r.lastError) html += `<div class="error-msg">${esc(r.lastError)}</div>`;
 
   if (!intel) {
     if (!r.lastError) {
@@ -448,11 +449,11 @@ function renderResearcher() {
   }
 
   if (intel.recent_papers?.length) {
-    html += `<div class="section-title">📄 Recent Papers</div>`;
+    html += `<div class="section-title">Recent papers</div>`;
     for (const p of intel.recent_papers) {
       html += `
         <div class="signal-card">
-          <div class="signal-card-type paper">Paper${p.year ? " · " + esc(p.year) : ""}</div>
+          <div class="signal-card-type paper">Paper${p.year ? " | " + esc(p.year) : ""}</div>
           <div class="signal-title">${safeHref(p.url) ? `<a href="${safeHref(p.url)}" target="_blank" rel="noopener">${esc(p.title)}</a>` : esc(p.title)}</div>
           ${p.citations ? `<div class="signal-meta">${esc(p.citations)} citations</div>` : ""}
           ${p.summary ? `<div class="signal-summary">${esc(p.summary)}</div>` : ""}
@@ -461,35 +462,35 @@ function renderResearcher() {
   }
 
   if (intel.citation_spikes?.length) {
-    html += `<div class="section-title">📈 Citation Spikes</div>`;
+    html += `<div class="section-title">Citation activity</div>`;
     for (const p of intel.citation_spikes) {
       html += `
         <div class="signal-card">
           <div class="signal-card-type citation">Citation Spike</div>
           <div class="signal-title">${esc(p.title)}</div>
-          <div class="signal-meta">${p.total_citations ? esc(p.total_citations) + " citations · " : ""}${esc(p.spike_note)}</div>
+          <div class="signal-meta">${p.total_citations ? esc(p.total_citations) + " citations | " : ""}${esc(p.spike_note)}</div>
         </div>`;
     }
   }
 
   if (intel.grants?.length) {
-    html += `<div class="section-title">💰 Grants & Funding</div>`;
+    html += `<div class="section-title">Grants and funding</div>`;
     for (const g of intel.grants) {
       html += `
         <div class="signal-card">
-          <div class="signal-card-type grant">Grant${g.funder ? " · " + esc(g.funder) : ""}</div>
+          <div class="signal-card-type grant">Grant${g.funder ? " | " + esc(g.funder) : ""}</div>
           <div class="signal-title">${esc(g.title)}</div>
-          <div class="signal-meta">${g.year ? esc(g.year) + " · " : ""}${esc(g.amount || "")}</div>
+          <div class="signal-meta">${g.year ? esc(g.year) + " | " : ""}${esc(g.amount || "")}</div>
         </div>`;
     }
   }
 
   if (intel.patents?.length) {
-    html += `<div class="section-title">⚙ Patents</div>`;
+    html += `<div class="section-title">Patents</div>`;
     for (const p of intel.patents) {
       html += `
         <div class="signal-card">
-          <div class="signal-card-type patent">Patent${p.year ? " · " + esc(p.year) : ""}</div>
+          <div class="signal-card-type patent">Patent${p.year ? " | " + esc(p.year) : ""}</div>
           <div class="signal-title">${esc(p.title)}</div>
           ${p.patent_number ? `<div class="signal-meta">${esc(p.patent_number)}</div>` : ""}
         </div>`;
@@ -497,7 +498,7 @@ function renderResearcher() {
   }
 
   if (intel.collaborations?.length) {
-    html += `<div class="section-title">🤝 Collaborations</div>`;
+    html += `<div class="section-title">Collaborations</div>`;
     for (const c of intel.collaborations) {
       html += `
         <div class="signal-card">
@@ -513,9 +514,8 @@ function renderResearcher() {
   if (empty) {
     html += `
       <div class="empty-state">
-        <div class="empty-icon">🔍</div>
         <div class="empty-title">No signals found</div>
-        <div class="empty-desc">TinyFish couldn't find structured data for this researcher. Try refreshing or tracking a Google Scholar profile URL directly.</div>
+        <div class="empty-desc">No structured research data was found. Try refreshing or track the researcher's Google Scholar profile directly.</div>
       </div>`;
   }
 
@@ -528,7 +528,7 @@ function updateAgentLog(steps) {
   if (!r) return;
   const el = document.getElementById(`agent-steps-${r.id}`);
   if (!el) { renderResearcher(); return; }
-  el.innerHTML = steps.map((s) => `<div class="agent-step">${esc(s)}</div>`).join("") + `<div class="agent-step blink">▍</div>`;
+  el.innerHTML = steps.map((s) => `<div class="agent-step">${esc(s)}</div>`).join("");
   el.scrollTop = el.scrollHeight;
 }
 
@@ -542,14 +542,14 @@ async function renderSettings() {
   content.innerHTML = `
     <div class="feed-header">
       <div class="feed-name">Settings</div>
-      <button class="btn ghost small" data-action="back">← Back</button>
+      <button class="btn ghost small" data-action="back">Back</button>
     </div>
 
     <div class="settings-section">
       <div class="settings-label">TinyFish API key</div>
       <div class="input-row">
         <input class="text-input" type="password" id="api-key-input" placeholder="Paste your API key" value="${esc(settings.apiKey)}" autocomplete="off" spellcheck="false" />
-        <button class="btn small" data-action="toggle-key-visibility" title="Show or hide">👁</button>
+        <button class="btn small" data-action="toggle-key-visibility">Show</button>
       </div>
       <div class="input-row" style="margin-top:8px;">
         <button class="btn primary small" data-action="save-key">Save</button>
@@ -593,7 +593,7 @@ async function renderSettings() {
 
     <div class="settings-footer">
       Signal v${esc(SIGNAL.VERSION)}<br/>
-      <a href="${esc(SIGNAL.PRIVACY_URL)}" target="_blank" rel="noopener">Privacy policy</a> ·
+      <a href="${esc(SIGNAL.PRIVACY_URL)}" target="_blank" rel="noopener">Privacy policy</a> |
       <a href="${esc(SIGNAL.SOURCE_URL)}" target="_blank" rel="noopener">Source</a>
     </div>`;
 }
@@ -618,7 +618,7 @@ async function testApiKey() {
   const input = document.getElementById("api-key-input");
   const apiKey = (input?.value || "").trim();
   if (!apiKey) { setKeyStatus("Enter an API key first.", false); return; }
-  setKeyStatus("Checking…", true);
+  setKeyStatus("Checking", true);
 
   const res = await send({ type: "TEST_CONNECTION", apiKey });
   if (!res?.success) { setKeyStatus(res?.error || "Connection failed.", false); return; }
@@ -629,23 +629,23 @@ async function testApiKey() {
 
 async function clearDetectionCache(btn) {
   await send({ type: "CLEAR_DETECT_CACHE" });
-  flashButton(btn, "✓ Cleared", "Clear detection cache");
+  flashButton(btn, "Cleared", "Clear detection cache");
   detectCurrentPage({ force: true });
 }
 
 async function runDailyNow(btn) {
-  if (btn) { btn.disabled = true; btn.textContent = "Running…"; }
+  if (btn) { btn.disabled = true; btn.textContent = "Running"; }
   const res = await send({ type: "RUN_DAILY_CHECK" });
-  const summary = res?.success ? `✓ ${res.checked} checked, ${res.skipped} skipped, ${res.failed} failed` : "⚠ Failed";
+  const summary = res?.success ? `${res.checked} checked, ${res.skipped} skipped, ${res.failed} failed` : "Failed";
   flashButton(btn, summary, "Run daily check now", 4000);
   await loadBookmarks();
 }
 
 async function triggerTestNotification(id) {
   const btn = document.querySelector(`[data-action="test-notification"][data-id="${id}"]`);
-  if (btn) { btn.disabled = true; btn.textContent = "Running…"; }
+  if (btn) { btn.disabled = true; btn.textContent = "Running"; }
   const res = await send({ type: "TEST_NOTIFICATION", researcherId: id });
-  flashButton(btn, res?.success ? "✓ Sent!" : `⚠ ${res?.error || "Failed"}`, "🔔 Test Alert");
+  flashButton(btn, res?.success ? "Sent" : (res?.error || "Failed"), "Test alert");
   await loadBookmarks();
   if (state.view === "researcher") renderResearcher();
 }

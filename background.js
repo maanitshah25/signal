@@ -131,20 +131,20 @@ function extractResult(event) {
 
 function extractStepMessage(event) {
   const type = String(event.type || "").toUpperCase();
-  if (type === "STARTED") return "🚀 Agent started";
-  if (type === "STREAMING_URL") return "🖥 Live browser session ready";
+  if (type === "STARTED") return "Update started";
+  if (type === "STREAMING_URL") return "Source page opened";
   if (type === "PROGRESS") {
-    if (event.purpose) return `⚡ ${String(event.purpose).slice(0, 160)}`;
-    if (event.tinyfish_api) return `🔍 Using TinyFish ${event.tinyfish_api}…`;
-    return "⚡ Working…";
+    if (event.purpose) return String(event.purpose).slice(0, 160);
+    if (event.tinyfish_api) return `Using TinyFish ${event.tinyfish_api}`;
+    return "Updating sources";
   }
-  if (type === "TF_API_RESULT") return `📥 Received ${event.tinyfish_api || "search"} results`;
+  if (type === "TF_API_RESULT") return `Received ${event.tinyfish_api || "search"} results`;
   // Older event shapes, kept so nothing goes silent if the stream format shifts.
-  if (type === "NAVIGATING") return `🌐 Navigating to ${event.url || "page"}…`;
-  if (type === "SEARCHING") return `🔍 Searching for ${event.query || "results"}…`;
-  if (type === "EXTRACTING") return "📄 Extracting data from page…";
-  if (type === "THINKING" || type === "PLANNING") return "🧠 Analyzing results…";
-  if (event.message) return `⚡ ${String(event.message).slice(0, 160)}`;
+  if (type === "NAVIGATING") return `Opening ${event.url || "source page"}`;
+  if (type === "SEARCHING") return `Searching for ${event.query || "results"}`;
+  if (type === "EXTRACTING") return "Reading source data";
+  if (type === "THINKING" || type === "PLANNING") return "Reviewing results";
+  if (event.message) return String(event.message).slice(0, 160);
   return null;
 }
 
@@ -271,8 +271,8 @@ function getMockIntelligence() {
       { title: "Efficient Fine-Tuning of Foundation Models via Gradient Checkpointing", year: year - 1, citations: 229, url: null, summary: "Demonstrates 60% memory reduction during fine-tuning with minimal accuracy tradeoff using selective gradient checkpointing." },
     ],
     citation_spikes: [
-      { title: "Attention Is All You Need — Revisited", total_citations: 4821, spike_note: "Citations up 38% in the last 6 months — likely driven by renewed interest in transformer efficiency research" },
-      { title: "Dropout: A Simple Way to Prevent Neural Networks from Overfitting", total_citations: 39200, spike_note: "Consistently high citation velocity — referenced in almost every new deep learning paper" },
+      { title: "Attention Is All You Need: Revisited", total_citations: 4821, spike_note: "Citations up 38% in the last 6 months, likely driven by renewed interest in transformer efficiency research" },
+      { title: "Dropout: A Simple Way to Prevent Neural Networks from Overfitting", total_citations: 39200, spike_note: "Consistently high citation velocity, referenced in almost every new deep learning paper" },
     ],
     grants: [
       { title: "Foundation Models for Scientific Discovery", funder: "NSF", year, amount: "$1,200,000" },
@@ -291,13 +291,13 @@ function getMockIntelligence() {
 
 async function simulateMockStream(researcherId) {
   const script = [
-    "🌐 Navigating to Google Scholar profile…",
-    "📄 Reading publications list…",
-    "🔍 Extracting recent papers and citation counts…",
-    "🌐 Checking NIH Reporter for grant awards…",
-    "🌐 Searching USPTO for patent filings…",
-    "🧠 Analyzing collaboration signals…",
-    "✓ Intelligence scan complete",
+    "Opening Google Scholar profile",
+    "Reading the publications list",
+    "Collecting recent papers and citation counts",
+    "Checking NIH Reporter for grant awards",
+    "Searching USPTO for patent filings",
+    "Reviewing collaboration data",
+    "Research update complete",
   ];
   const steps = [];
   for (const step of script) {
@@ -486,7 +486,7 @@ function notifyNewPaper(researcher, paper) {
   chrome.notifications.create(`${NOTIFICATION_PREFIX}${researcher.id}`, {
     type: "basic",
     iconUrl: "icons/icon48.png",
-    title: `New paper — ${researcher.name}`,
+    title: `New paper from ${researcher.name}`,
     message: paper.title,
   });
 }

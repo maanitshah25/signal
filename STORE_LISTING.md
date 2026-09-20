@@ -69,7 +69,7 @@ Load the extension unpacked, turn on **Developer mode → Mock mode** in Setting
 | Screenshot 2 | 1280×800 | Recommended | Researcher feed with papers, grants, patents populated |
 | Screenshot 3 | 1280×800 | Recommended | Feed list with several tracked researchers, one showing "New" |
 | Screenshot 4 | 1280×800 | Optional | Settings page with API key field and "Connected. Wallet balance" status |
-| Small promo tile | 440×280 | Yes | Logo mark + "Signal" + one-line tagline on the dark purple palette |
+| Small promo tile | 440×280 | Yes | Logo mark, "Signal", and one-line tagline on the warm ivory and light blue palette |
 | Marquee promo tile | 1400×560 | Optional | Same, wide |
 
 Screenshots must be PNG or JPEG with no transparency. Turn mock mode off again before you take the Settings screenshot if you want a real balance shown.

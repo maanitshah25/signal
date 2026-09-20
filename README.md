@@ -8,7 +8,7 @@ and receive a feed of their papers, citation spikes, grants, and patents. Powere
 
 1. Clone this repo.
 2. Open `chrome://extensions`, enable **Developer mode**, click **Load unpacked**, select this folder.
-3. Click the Signal icon to open the side panel, then ⚙ **Settings** and paste your TinyFish API key
+3. Click the Signal icon to open the side panel, open **Settings**, and paste your TinyFish API key
    from [agent.tinyfish.ai/api-keys](https://agent.tinyfish.ai/api-keys). **Test connection** checks the key for free.
 
 ## How it works
