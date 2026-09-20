@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Signal – Research Intelligence Tracker",
   "version": "1.1.0",
-  "description": "Track any researcher with one click and get a feed of their new papers, citation spikes, grants, and patents. Uses your own TinyFish API key.",
+  "description": "Track any researcher with one click & get a feed of their new papers, citation spikes, and patents. Uses your own TinyFish API key.",
   "minimum_chrome_version": "114",
   "homepage_url": "https://github.com/maanitshah25/signal",
   "permissions": [
